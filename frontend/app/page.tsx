@@ -18,7 +18,12 @@ import {
   RetrieveDocumentsNodeUpdates,
 } from '@/types/graphTypes';
 import { Card, CardContent } from '@/components/ui/card';
+import Particles from '@/components/particles';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { useTheme } from 'next-themes';
+
 export default function Home() {
+  const { theme } = useTheme();
   const { toast } = useToast(); // Add this hook
   const [messages, setMessages] = useState<
     Array<{
@@ -267,20 +272,32 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 md:p-24 max-w-5xl mx-auto w-full">
-      {messages.length === 0 ? (
+    <>
+      {/* Particles background - only visible in dark mode */}
+      {theme === 'dark' && (
+        <div className="fixed inset-0 pointer-events-none z-0">
+          <Particles
+            particleCount={150}
+            particleSpread={15}
+            speed={0.05}
+            particleColors={['#ffffff', '#ffffff', '#ffffff']}
+            alphaParticles={true}
+            particleBaseSize={200}
+            sizeRandomness={2}
+          />
+        </div>
+      )}
+
+      {/* Theme toggle button */}
+      <ThemeToggle />
+
+      <main className="flex min-h-screen flex-col items-center p-4 md:p-24 max-w-5xl mx-auto w-full relative z-10">
+        {messages.length === 0 ? (
         <>
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <p className="font-medium text-muted-foreground max-w-md mx-auto">
-                This ai chatbot is an example template to accompany the book:{' '}
-                <a
-                  href="https://www.oreilly.com/library/view/learning-langchain/9781098167271/"
-                  className="underline hover:text-foreground"
-                >
-                  Learning LangChain (O'Reilly): Building AI and LLM
-                  applications with LangChain and LangGraph
-                </a>
+              <p className="font-medium text-muted-foreground max-w-md mx-auto text-2xl">
+                Coffee and Jarvis time? ☕
               </p>
             </div>
           </div>
@@ -310,7 +327,7 @@ export default function Home() {
           )}
 
           <form onSubmit={handleSubmit} className="relative">
-            <div className="flex gap-2 border rounded-md overflow-hidden bg-gray-50">
+            <div className="flex gap-2 border rounded-md overflow-hidden bg-gray-50 dark:bg-gray-900">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -329,10 +346,10 @@ export default function Home() {
               >
                 {isUploading ? (
                   <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin text-foreground" />
                   </div>
                 ) : (
-                  <Paperclip className="h-4 w-4" />
+                  <Paperclip className="h-4 w-4 text-foreground" />
                 )}
               </Button>
               <Input
@@ -363,5 +380,6 @@ export default function Home() {
         </div>
       </div>
     </main>
+    </>
   );
 }

@@ -23,7 +23,8 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { useTheme } from 'next-themes';
 
 export default function Home() {
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
+  const isDarkMode = resolvedTheme === 'dark';
   const { toast } = useToast(); // Add this hook
   const [messages, setMessages] = useState<
     Array<{
@@ -274,7 +275,7 @@ export default function Home() {
   return (
     <>
       {/* Particles background - only visible in dark mode */}
-      {theme === 'dark' && (
+      {isDarkMode && (
         <div className="fixed inset-0 pointer-events-none z-0">
           <Particles
             particleCount={150}
@@ -327,7 +328,13 @@ export default function Home() {
           )}
 
           <form onSubmit={handleSubmit} className="relative">
-            <div className="flex gap-2 border rounded-md overflow-hidden bg-gray-50 dark:bg-gray-900">
+            <div
+              className="flex gap-2 border rounded-md overflow-hidden shadow-sm transition-colors"
+              style={{
+                backgroundColor: isDarkMode ? '#111827' : '#ffffff',
+                borderColor: isDarkMode ? '#1f2937' : '#e5e7eb',
+              }}
+            >
               <input
                 type="file"
                 ref={fileInputRef}
@@ -343,6 +350,10 @@ export default function Home() {
                 className="rounded-none h-12"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: isDarkMode ? '#f9fafb' : '#111827',
+                }}
               >
                 {isUploading ? (
                   <div className="flex items-center gap-2">
@@ -360,14 +371,23 @@ export default function Home() {
                 }
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-12 bg-transparent"
                 disabled={isUploading || isLoading || !threadId}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: isDarkMode ? '#f9fafb' : '#111827',
+                }}
               />
               <Button
                 type="submit"
+                variant="ghost"
                 size="icon"
                 className="rounded-none h-12"
                 disabled={
                   !input.trim() || isUploading || isLoading || !threadId
                 }
+                style={{
+                  backgroundColor: 'transparent',
+                  color: isDarkMode ? '#f9fafb' : '#111827',
+                }}
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

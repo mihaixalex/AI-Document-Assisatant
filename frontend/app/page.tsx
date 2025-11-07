@@ -10,14 +10,11 @@ import { Paperclip, ArrowUp, Loader2 } from 'lucide-react';
 import { ExamplePrompts } from '@/components/example-prompts';
 import { ChatMessage } from '@/components/chat-message';
 import { FilePreview } from '@/components/file-preview';
-import { client } from '@/lib/langgraph-client';
 import {
   AgentState,
   documentType,
   PDFDocument,
-  RetrieveDocumentsNodeUpdates,
 } from '@/types/graphTypes';
-import { Card, CardContent } from '@/components/ui/card';
 import Particles from '@/components/particles';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useTheme } from 'next-themes';
@@ -44,28 +41,12 @@ export default function Home() {
   const lastRetrievedDocsRef = useRef<PDFDocument[]>([]); // useRef to store the last retrieved documents
 
   useEffect(() => {
-    // Create a thread when the component mounts
-    const initThread = async () => {
-      // Skip if we already have a thread
-      if (threadId) return;
-
-      try {
-        const thread = await client.createThread();
-
-        setThreadId(thread.thread_id);
-      } catch (error) {
-        console.error('Error creating thread:', error);
-        toast({
-          title: 'Error',
-          description:
-            'Error creating thread. Please make sure you have set the LANGGRAPH_API_URL environment variable correctly. ' +
-            error,
-          variant: 'destructive',
-        });
-      }
-    };
-    initThread();
-  }, []);
+    // Generate thread ID locally - no server call needed
+    if (!threadId) {
+      const uuid = crypto.randomUUID();
+      setThreadId(uuid);
+    }
+  }, [threadId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -164,22 +145,65 @@ export default function Home() {
               }
             }
           } else if (event === 'updates' && data) {
-            if (
-              data &&
-              typeof data === 'object' &&
-              'retrieveDocuments' in data &&
-              data.retrieveDocuments &&
-              Array.isArray(data.retrieveDocuments.documents)
-            ) {
-              const retrievedDocs = (data as RetrieveDocumentsNodeUpdates)
-                .retrieveDocuments.documents as PDFDocument[];
+            // Extract the updates object (backend sends data.updates.nodeName)
+            const updates = data?.updates || data;
 
-              // // Handle documents here
+            // Handle document retrieval updates
+            if (
+              updates?.retrieveDocuments?.documents &&
+              Array.isArray(updates.retrieveDocuments.documents)
+            ) {
+              const retrievedDocs = updates.retrieveDocuments.documents as PDFDocument[];
               lastRetrievedDocsRef.current = retrievedDocs;
               console.log('Retrieved documents:', retrievedDocs);
-            } else {
-              // Clear the last retrieved documents if it's a direct answer
-              lastRetrievedDocsRef.current = [];
+            }
+
+            // Handle directAnswer node - extract AI message
+            if (
+              updates?.directAnswer?.messages &&
+              Array.isArray(updates.directAnswer.messages)
+            ) {
+              const messages = updates.directAnswer.messages;
+              const aiMessage = messages.find((msg: any) => msg.type === 'ai');
+
+              if (aiMessage && typeof aiMessage.content === 'string') {
+                setMessages((prev) => {
+                  const newArr = [...prev];
+                  if (
+                    newArr.length > 0 &&
+                    newArr[newArr.length - 1].role === 'assistant'
+                  ) {
+                    newArr[newArr.length - 1].content = aiMessage.content;
+                    newArr[newArr.length - 1].sources =
+                      lastRetrievedDocsRef.current;
+                  }
+                  return newArr;
+                });
+              }
+            }
+
+            // Handle generateResponse node - extract AI message
+            if (
+              updates?.generateResponse?.messages &&
+              Array.isArray(updates.generateResponse.messages)
+            ) {
+              const messages = updates.generateResponse.messages;
+              const aiMessage = messages.find((msg: any) => msg.type === 'ai');
+
+              if (aiMessage && typeof aiMessage.content === 'string') {
+                setMessages((prev) => {
+                  const newArr = [...prev];
+                  if (
+                    newArr.length > 0 &&
+                    newArr[newArr.length - 1].role === 'assistant'
+                  ) {
+                    newArr[newArr.length - 1].content = aiMessage.content;
+                    newArr[newArr.length - 1].sources =
+                      lastRetrievedDocsRef.current;
+                  }
+                  return newArr;
+                });
+              }
             }
           } else {
             console.log('Unknown SSE event:', event, data);

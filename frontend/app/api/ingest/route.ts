@@ -1,9 +1,22 @@
 // app/api/ingest/route.ts
 import { indexConfig } from '@/constants/graphConfigs';
-import { langGraphServerClient } from '@/lib/langgraph-server';
-import { processPDF } from '@/lib/pdf';
-import { Document } from '@langchain/core/documents';
 import { NextRequest, NextResponse } from 'next/server';
+import { v4 as uuidv4 } from 'uuid';
+import http from 'http';
+import https from 'https';
+
+export const runtime = 'nodejs';
+
+// Create HTTP agents that force IPv4
+const httpAgent = new http.Agent({
+  family: 4, // Force IPv4
+  keepAlive: true,
+});
+
+const httpsAgent = new https.Agent({
+  family: 4, // Force IPv4
+  keepAlive: true,
+});
 
 // Configuration constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -11,16 +24,6 @@ const ALLOWED_FILE_TYPES = ['application/pdf'];
 
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.LANGGRAPH_INGESTION_ASSISTANT_ID) {
-      return NextResponse.json(
-        {
-          error:
-            'LANGGRAPH_INGESTION_ASSISTANT_ID is not set in your environment variables',
-        },
-        { status: 500 },
-      );
-    }
-
     const formData = await request.formData();
     const files: File[] = [];
 
@@ -60,45 +63,73 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Process all PDFs into Documents
-    const allDocs: Document[] = [];
+    const fastApiUrl =
+      process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
+    // Process each file and send to FastAPI
+    const results = [];
     for (const file of files) {
       try {
-        const docs = await processPDF(file);
-        allDocs.push(...docs);
+        // Generate thread ID for this ingestion
+        const threadId = uuidv4();
+
+        // Create FormData for FastAPI request
+        const fastapiFormData = new FormData();
+        fastapiFormData.append('file', file);
+        fastapiFormData.append('threadId', threadId);
+        fastapiFormData.append('config', JSON.stringify({
+          configurable: {
+            ...indexConfig,
+          },
+        }));
+
+        // Send to FastAPI backend with IPv4-only agent
+        const response = await fetch(`${fastApiUrl}/api/ingest`, {
+          method: 'POST',
+          body: fastapiFormData,
+          // @ts-ignore - agent option exists but not in types
+          agent: fastApiUrl.startsWith('https') ? httpsAgent : httpAgent,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error(`Error ingesting ${file.name}:`, errorData);
+          results.push({
+            file: file.name,
+            status: 'error',
+            error: errorData.detail || 'Ingestion failed',
+          });
+        } else {
+          const resultData = await response.json();
+          results.push({
+            file: file.name,
+            status: 'success',
+            threadId: resultData.thread_id,
+          });
+        }
       } catch (error: any) {
         console.error(`Error processing file ${file.name}:`, error);
-        // Continue processing other files; errors are logged
+        results.push({
+          file: file.name,
+          status: 'error',
+          error: error.message || 'Unknown error',
+        });
       }
     }
 
-    if (!allDocs.length) {
+    // Check if any succeeded
+    const successCount = results.filter((r) => r.status === 'success').length;
+
+    if (successCount === 0) {
       return NextResponse.json(
-        { error: 'No valid documents extracted from uploaded files' },
+        { error: 'Failed to ingest any documents', results },
         { status: 500 },
       );
     }
 
-    // Run the ingestion graph
-    const thread = await langGraphServerClient.createThread();
-    const ingestionRun = await langGraphServerClient.client.runs.wait(
-      thread.thread_id,
-      'ingestion_graph',
-      {
-        input: {
-          docs: allDocs,
-        },
-        config: {
-          configurable: {
-            ...indexConfig,
-          },
-        },
-      },
-    );
-
     return NextResponse.json({
-      message: 'Documents ingested successfully',
-      threadId: thread.thread_id,
+      message: `Successfully ingested ${successCount} of ${files.length} documents`,
+      results,
     });
   } catch (error: any) {
     console.error('Error processing files:', error);

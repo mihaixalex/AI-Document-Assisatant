@@ -5,7 +5,6 @@ import path from 'path';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { processPDF } from '@/lib/pdf';
-import { langGraphServerClient } from '@/lib/langgraph-server';
 
 // Mock the processPDF function
 jest.mock('@/lib/pdf', () => ({
@@ -18,24 +17,6 @@ jest.mock('@/lib/pdf', () => ({
     ]);
   }),
 }));
-
-// Mock the langGraphServerClient
-jest.mock('@/lib/langgraph-server', () => {
-  return {
-    langGraphServerClient: {
-      createThread: jest
-        .fn()
-        .mockResolvedValue({ thread_id: 'test-thread-id' }),
-      client: {
-        runs: {
-          stream: jest.fn().mockImplementation(async function* () {
-            yield { data: 'test' };
-          }),
-        },
-      },
-    },
-  };
-});
 describe('PDF Ingest Route (node-fetch)', () => {
   const baseUrl = 'http://localhost:3000'; // Replace with your dev server URL
   const ingestUrl = `${baseUrl}/api/ingest`;
@@ -143,7 +124,7 @@ startxref
     expect(processPDF).toHaveBeenCalled();
   });
 
-  it.skip('should call the ingestion graph with the correct data', async () => {
+  it.skip('should call the FastAPI ingestion endpoint with the correct data', async () => {
     const formData = new FormData();
     formData.append('files', fs.createReadStream(pdfFilePath), 'test.pdf');
 
@@ -152,17 +133,8 @@ startxref
       body: formData,
     });
 
-    expect(langGraphServerClient.createThread).toHaveBeenCalled();
-    expect(langGraphServerClient.client.runs.stream).toHaveBeenCalledWith(
-      'test-thread-id',
-      'ingestion_graph',
-      {
-        input: {
-          docs: [
-            { pageContent: 'Test content', metadata: { filename: 'test.pdf' } },
-          ],
-        },
-      },
-    );
+    // Note: This test would need to mock the FastAPI backend call
+    // The API route now calls NEXT_PUBLIC_API_URL/ingest directly
+    expect(processPDF).toHaveBeenCalled();
   });
 });

@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/langgraph-server';
 import { retrievalAssistantStreamConfig } from '@/constants/graphConfigs';
+import http from 'http';
+import https from 'https';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
+
+// Create HTTP agents that force IPv4
+const httpAgent = new http.Agent({
+  family: 4, // Force IPv4
+  keepAlive: true,
+});
+
+const httpsAgent = new https.Agent({
+  family: 4, // Force IPv4
+  keepAlive: true,
+});
 
 export async function POST(req: Request) {
   try {
@@ -28,60 +40,36 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!process.env.LANGGRAPH_RETRIEVAL_ASSISTANT_ID) {
-      return new NextResponse(
-        JSON.stringify({
-          error: 'LANGGRAPH_RETRIEVAL_ASSISTANT_ID is not set',
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
+    const fastApiUrl =
+      process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
     try {
-      const assistantId = process.env.LANGGRAPH_RETRIEVAL_ASSISTANT_ID;
-      const serverClient = createServerClient();
-
-      const stream = await serverClient.client.runs.stream(
-        threadId,
-        assistantId,
-        {
-          input: { query: message },
-          streamMode: ['messages', 'updates'],
+      // Call FastAPI backend with IPv4-only agent
+      const response = await fetch(`${fastApiUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          threadId,
           config: {
             configurable: {
               ...retrievalAssistantStreamConfig,
             },
           },
-        },
-      );
-
-      // Set up response as a stream
-      const encoder = new TextEncoder();
-      const customReadable = new ReadableStream({
-        async start(controller) {
-          try {
-            // Forward each chunk from the graph to the client
-            for await (const chunk of stream) {
-              // Only send relevant chunks
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`),
-              );
-            }
-          } catch (error) {
-            console.error('Streaming error:', error);
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ error: 'Streaming error occurred' })}\n\n`,
-              ),
-            );
-          } finally {
-            controller.close();
-          }
-        },
+        }),
+        // @ts-ignore - agent option exists but not in types
+        agent: fastApiUrl.startsWith('https') ? httpsAgent : httpAgent,
       });
 
-      // Return the stream with appropriate headers
-      return new Response(customReadable, {
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'FastAPI request failed');
+      }
+
+      // Return the streaming response from FastAPI
+      return new Response(response.body, {
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
@@ -89,10 +77,13 @@ export async function POST(req: Request) {
         },
       });
     } catch (error) {
-      // Handle streamRun errors
-      console.error('Stream initialization error:', error);
+      // Handle FastAPI communication errors
+      console.error('FastAPI communication error:', error);
       return new NextResponse(
-        JSON.stringify({ error: 'Internal server error' }),
+        JSON.stringify({
+          error: 'Failed to communicate with backend',
+          details: error instanceof Error ? error.message : 'Unknown error',
+        }),
         {
           status: 500,
           headers: { 'Content-Type': 'application/json' },

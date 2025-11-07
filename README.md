@@ -1,6 +1,6 @@
 # AI PDF Chatbot
 
-LangGraph-based RAG chatbot that ingests PDFs into Supabase vector store and answers queries using OpenAI.
+FastAPI + LangGraph RAG chatbot that ingests PDFs into Supabase vector store and answers queries using OpenAI.
 
 ## Table of Contents
 
@@ -26,15 +26,17 @@ LangGraph-based RAG chatbot that ingests PDFs into Supabase vector store and ans
 - Streaming responses for real-time conversational experience
 
 **Built on Modern AI Stack**
+- **FastAPI**: Production-ready HTTP server with automatic OpenAPI documentation
 - **LangGraph State Graphs**: Two separate graphs for ingestion and retrieval workflows
 - **Vector Search**: Supabase vector store with pgvector for semantic search
 - **OpenAI Integration**: GPT-4o-mini for embeddings and response generation
 - **LangSmith Tracing**: Optional observability for debugging and monitoring
 
 **Developer Experience**
-- Hot reload with LangGraph dev server and Next.js dev mode
-- LangGraph Studio UI for visual graph debugging
-- Comprehensive test suite with mocking patterns
+- Hot reload with FastAPI and Next.js dev mode
+- Swagger UI at `/docs` for API exploration
+- LangGraph Studio (optional) for visual graph debugging
+- Comprehensive test suite with 90% coverage target
 - Type safety with TypeScript and Python type hints
 
 ## Quick Start
@@ -53,7 +55,7 @@ cp backend/.env.example backend/.env
 # Edit backend/.env with your OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 # 3. Configure frontend
-cp frontend/.env.example frontend/.env
+cp frontend/.env.example frontend/.env.local
 # Edit if needed (defaults work for local dev)
 
 # 4. Set up Supabase
@@ -61,7 +63,7 @@ cp frontend/.env.example frontend/.env
 # https://python.langchain.com/docs/integrations/vectorstores/supabase/
 
 # 5. Start backend (terminal 1)
-cd backend && poetry run langgraph dev
+cd backend && poetry run uvicorn src.main:app --reload
 
 # 6. Start frontend (terminal 2)
 cd frontend && yarn dev
@@ -74,23 +76,26 @@ cd frontend && yarn dev
 ```mermaid
 flowchart LR
     U[User] -->|Upload PDF| F[Frontend :3000]
-    F -->|POST /api/ingest| I[Ingestion Graph]
+    F -->|POST /api/ingest| N[Next.js API]
+    N -->|HTTP| FA[FastAPI :8000]
+    FA -->|Execute| I[Ingestion Graph]
     I -->|Embed & store| S[(Supabase)]
 
     U -->|Ask question| F
-    F -->|POST /api/chat SSE| R[Retrieval Graph]
+    F -->|POST /api/chat SSE| N
+    N -->|HTTP| FA
+    FA -->|Execute| R[Retrieval Graph]
     R -->|Query| S
     S -->|Docs| R
-    R -->|LLM response| O[OpenAI]
-    O -->|Answer stream| F
-
-    I -.runs on.-> B[LangGraph :2024]
-    R -.runs on.-> B
+    R -->|LLM call| O[OpenAI]
+    O -->|Stream| FA
+    FA -->|SSE| N
+    N -->|SSE| F
 ```
 
 **Components**
 - **Frontend**: Next.js 14 React app with PDF upload and chat UI
-- **Backend**: Python LangGraph service with two state graphs
+- **Backend**: FastAPI wrapping LangGraph execution
   - `ingestion_graph`: Processes PDFs → embeddings → Supabase
   - `retrieval_graph`: Routes query → retrieves docs → generates answer
 - **Vector Store**: Supabase with `documents` table and `match_documents` function
@@ -114,41 +119,39 @@ flowchart TD
 .
 ├── backend/
 │   ├── src/
-│   │   ├── ingestion_graph/    # PDF indexing graph
-│   │   │   ├── graph.py        # Graph: ingestDocs node
-│   │   │   ├── state.py        # IndexState definition
+│   │   ├── main.py              # FastAPI application
+│   │   ├── ingestion_graph/     # PDF indexing graph
+│   │   │   ├── graph.py         # Graph: ingestDocs node
+│   │   │   ├── state.py         # IndexState definition
 │   │   │   └── configuration.py
-│   │   ├── retrieval_graph/    # Q&A graph
-│   │   │   ├── graph.py        # Graph: 4 nodes with routing
-│   │   │   ├── state.py        # AgentState definition
-│   │   │   ├── prompts.py      # Router & response prompts
-│   │   │   ├── utils.py        # Doc formatting helpers
+│   │   ├── retrieval_graph/     # Q&A graph
+│   │   │   ├── graph.py         # Graph: 4 nodes with routing
+│   │   │   ├── state.py         # AgentState definition
+│   │   │   ├── prompts.py       # Router & response prompts
+│   │   │   ├── utils.py         # Doc formatting helpers
 │   │   │   └── configuration.py
-│   │   ├── shared/             # Shared utilities
+│   │   ├── shared/              # Shared utilities
 │   │   │   ├── configuration.py # BaseConfiguration
-│   │   │   ├── retrieval.py    # make_retriever factory
-│   │   │   ├── state.py        # reduce_docs reducer
-│   │   │   └── utils.py        # load_chat_model
-│   │   ├── health.py           # Health check endpoint
-│   │   └── sample_docs.json    # Demo data
-│   ├── tests/                  # pytest suite (90% coverage target)
-│   ├── pyproject.toml          # Poetry config
-│   ├── langgraph.json          # Graph endpoint definitions
-│   └── Dockerfile              # Production image
+│   │   │   ├── retrieval.py     # make_retriever factory
+│   │   │   ├── state.py         # reduce_docs reducer
+│   │   │   └── utils.py         # load_chat_model
+│   │   └── sample_docs.json     # Demo data
+│   ├── tests/                   # pytest suite (90% coverage target)
+│   ├── pyproject.toml           # Poetry config
+│   ├── langgraph.json           # Graph definitions (for LangGraph Studio)
+│   └── Dockerfile               # Production image
 ├── frontend/
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── ingest/route.ts # PDF upload handler
-│   │   │   └── chat/route.ts   # SSE streaming handler
-│   │   ├── page.tsx            # Chat UI
+│   │   │   ├── ingest/route.ts  # PDF upload handler
+│   │   │   └── chat/route.ts    # SSE streaming handler
+│   │   ├── page.tsx             # Chat UI
 │   │   └── layout.tsx
-│   ├── components/             # React + shadcn/ui
+│   ├── components/              # React + shadcn/ui
 │   ├── lib/
-│   │   ├── langgraph-server.ts # Backend SDK (server-side)
-│   │   ├── langgraph-client.ts # Backend SDK (client-side)
-│   │   └── pdf.ts              # PDF parsing
+│   │   └── pdf.ts               # PDF parsing
 │   └── constants/graphConfigs.ts # Graph defaults (model, k, provider)
-└── .github/workflows/ci.yml    # CI: format + lint
+└── .github/workflows/ci.yml     # CI: format + lint
 ```
 
 ## Configuration
@@ -162,6 +165,7 @@ Backend (`.env` in `backend/`):
 | OPENAI_API_KEY | Yes | OpenAI API key | sk-... |
 | SUPABASE_URL | Yes | Supabase project URL | https://xxx.supabase.co |
 | SUPABASE_SERVICE_ROLE_KEY | Yes | Supabase service role key | eyJh... |
+| ALLOWED_ORIGINS | No | CORS allowed origins | http://localhost:3000 |
 | LANGCHAIN_TRACING_V2 | No | Enable LangSmith tracing | true |
 | LANGCHAIN_API_KEY | No | LangSmith API key | lsv2_... |
 | LANGCHAIN_PROJECT | No | LangSmith project name | ai-pdf-chatbot |
@@ -170,18 +174,18 @@ Frontend (`.env.local` in `frontend/`):
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| NEXT_PUBLIC_LANGGRAPH_API_URL | No | Backend URL | http://127.0.0.1:2024 |
-| LANGGRAPH_INGESTION_ASSISTANT_ID | No | Ingestion graph ID | ingestion_graph |
-| LANGGRAPH_RETRIEVAL_ASSISTANT_ID | No | Retrieval graph ID | retrieval_graph |
+| NEXT_PUBLIC_API_URL | No | FastAPI backend URL | http://127.0.0.1:8000 |
 | LANGCHAIN_API_KEY | No | LangSmith API key | |
 | LANGCHAIN_TRACING_V2 | No | Enable tracing | true |
 | LANGCHAIN_PROJECT | No | Project name | AI-Document-Assistant |
 
 **Ports and URLs**
-- Backend LangGraph server: `http://localhost:2024`
+- Backend FastAPI server: `http://localhost:8000`
 - Frontend dev server: `http://localhost:3000`
-- LangGraph Studio UI: `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
-- API Documentation: `http://localhost:2024/docs`
+- API Documentation (Swagger): `http://localhost:8000/docs`
+- API Documentation (ReDoc): `http://localhost:8000/redoc`
+- Health Check: `http://localhost:8000/health`
+- LangGraph Studio (optional): `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
 
 ## Running Locally
 
@@ -191,7 +195,7 @@ Terminal 1 - Backend:
 ```bash
 cd backend
 poetry install
-poetry run langgraph dev
+poetry run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Terminal 2 - Frontend:
@@ -203,15 +207,22 @@ yarn dev
 
 Access:
 - Chat UI: http://localhost:3000
-- LangGraph Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-- API Docs: http://localhost:2024/docs
+- API Docs: http://localhost:8000/docs
+- Health Check: http://localhost:8000/health
+
+**Optional: LangGraph Studio (for debugging graphs)**
+```bash
+cd backend
+poetry run langgraph dev  # Runs on port 2024
+# Open: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+```
 
 **Docker (backend only)**
 
 ```bash
 cd backend
 docker build -t pdf-chatbot-backend .
-docker run -p 2024:2024 --env-file .env pdf-chatbot-backend
+docker run -p 8000:8000 --env-file .env pdf-chatbot-backend
 ```
 
 Note: No docker-compose provided. Frontend deployment via Vercel/Netlify recommended.
@@ -223,6 +234,9 @@ Note: No docker-compose provided. Frontend deployment via Vercel/Netlify recomme
 Required table and function for vector search:
 
 ```sql
+-- Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Table: documents
 CREATE TABLE documents (
   id BIGSERIAL PRIMARY KEY,
@@ -230,6 +244,10 @@ CREATE TABLE documents (
   metadata JSONB,
   embedding VECTOR(1536)
 );
+
+-- Index for faster similarity search
+CREATE INDEX ON documents USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
 
 -- Function: match_documents
 CREATE FUNCTION match_documents (
@@ -268,32 +286,84 @@ For detailed setup: https://js.langchain.com/docs/integrations/vectorstores/supa
 
 ## API
 
-**Endpoints**
+**FastAPI Endpoints**
 
-- `POST /api/ingest` - Upload PDFs (max 5 files, 10MB each)
-  - Request: `multipart/form-data` with `files` field
-  - Response: `{ message, threadId }`
+Base URL: `http://localhost:8000`
 
-- `POST /api/chat` - Query chatbot (SSE stream)
-  - Request: `{ message: string, threadId: string }`
-  - Response: Server-Sent Events with LangGraph chunks
+### Health Check
+```bash
+GET /health
+```
+Response: `{"status": "healthy", "version": "0.1.0"}`
+
+### Upload PDFs
+```bash
+POST /api/ingest
+Content-Type: multipart/form-data
+
+Parameters:
+- file: PDF file (required, max 10MB)
+- threadId: string (required)
+- config: JSON string (optional)
+
+Response:
+{
+  "status": "success",
+  "message": "Successfully ingested filename.pdf",
+  "thread_id": "abc123",
+  "result": "..."
+}
+```
+
+### Chat Query
+```bash
+POST /api/chat
+Content-Type: application/json
+
+Body:
+{
+  "message": "What is the main topic?",
+  "threadId": "abc123",
+  "config": {
+    "configurable": {
+      "queryModel": "openai/gpt-4o-mini",
+      "retrieverProvider": "supabase",
+      "k": 5
+    }
+  }
+}
+
+Response: Server-Sent Events (SSE) stream
+data: {"event": "updates", "data": {...}}
+```
+
+**Next.js API Routes** (Frontend)
+
+These proxy to FastAPI:
+- `POST /api/ingest` → `http://localhost:8000/api/ingest`
+- `POST /api/chat` → `http://localhost:8000/api/chat`
 
 **Example: Upload PDF**
 
 ```bash
-curl -X POST http://localhost:3000/api/ingest \
-  -F "files=@document.pdf"
+curl -X POST http://localhost:8000/api/ingest \
+  -F "file=@document.pdf" \
+  -F "threadId=test-123"
 ```
 
 **Example: Ask Question**
 
 ```bash
-curl -X POST http://localhost:3000/api/chat \
+curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "What is the main topic?", "threadId": "abc123"}'
+  -d '{
+    "message": "What is the main topic?",
+    "threadId": "test-123"
+  }' \
+  -N
 ```
 
-**OpenAPI**: Not available. LangGraph Studio provides graph visualization.
+**OpenAPI Documentation**: Available at `http://localhost:8000/docs` (Swagger UI) and `http://localhost:8000/redoc` (ReDoc)
 
 ## Quality
 
@@ -358,17 +428,17 @@ Jobs:
 
 **Deploy Backend**
 
-Option 1 - LangGraph Cloud:
-```bash
-# Follow: https://langchain-ai.github.io/langgraph/cloud/quick_start/
-```
-
-Option 2 - Self-hosted:
+Option 1 - Docker:
 ```bash
 cd backend
 docker build -t pdf-chatbot .
 docker push your-registry/pdf-chatbot
-# Deploy to your infrastructure
+# Deploy to your infrastructure (AWS ECS, GCP Cloud Run, etc.)
+```
+
+Option 2 - LangGraph Cloud (optional):
+```bash
+# Follow: https://langchain-ai.github.io/langgraph/cloud/quick_start/
 ```
 
 **Deploy Frontend**
@@ -380,20 +450,21 @@ vercel --prod
 ```
 
 Set env vars in Vercel dashboard:
-- `NEXT_PUBLIC_LANGGRAPH_API_URL` = your deployed backend URL
-- `LANGGRAPH_INGESTION_ASSISTANT_ID` = ingestion_graph
-- `LANGGRAPH_RETRIEVAL_ASSISTANT_ID` = retrieval_graph
+- `NEXT_PUBLIC_API_URL` = your deployed FastAPI URL (e.g., https://api.yourdomain.com)
+- `LANGCHAIN_API_KEY` = your LangSmith API key (optional)
+- `LANGCHAIN_TRACING_V2` = true (optional)
+- `LANGCHAIN_PROJECT` = your project name (optional)
 
 ## Security Notes
 
 - **Authentication**: None. `/api/ingest` and `/api/chat` are public endpoints.
-- **CORS**: Frontend API routes run server-side; no CORS issues.
+- **CORS**: Configured in FastAPI to allow frontend origins (see `ALLOWED_ORIGINS` in backend .env)
 - **Rate Limiting**: None. Add rate-limiting middleware before production.
 - **API Keys**: Stored in `.env` files. Never commit `.env` to git.
-- **File Upload**: Limited to 5 PDFs, 10MB each (configurable in `app/api/ingest/route.ts`)
+- **File Upload**: Limited to 5 PDFs, 10MB each (configurable in `src/main.py`)
 - **Secrets**: LangChain API key is optional but recommended for debugging.
 
-TODO: Add authentication (e.g., NextAuth.js) and rate limiting (e.g., upstash/ratelimit).
+TODO: Add authentication (e.g., JWT) and rate limiting (e.g., slowapi) to FastAPI.
 
 ## Troubleshooting
 
@@ -429,59 +500,59 @@ Error: pyproject.toml changed significantly since poetry.lock was last generated
 Fix: cd backend && poetry lock && poetry install
 ```
 
-**6. `langgraph: command not found` or `Required package 'langgraph-api' is not installed`**
-```
-Error: Command not found: langgraph
-       Or: Required package 'langgraph-api' is not installed
-Fix: cd backend && poetry lock && poetry install
-     (Ensures langgraph-cli[inmem] is installed from updated pyproject.toml)
-```
-
-**7. `Port 2024 already in use`**
+**6. `Port 8000 already in use`**
 ```
 Error: Address already in use
-Fix: Kill process: lsof -ti:2024 | xargs kill -9
-     Or: Change port in langgraph.json and NEXT_PUBLIC_LANGGRAPH_API_URL
+Fix: Kill process: lsof -ti:8000 | xargs kill -9
+     Or: Change port: uvicorn src.main:app --port 8001
 ```
 
-**8. Frontend can't connect to backend**
+**7. Frontend can't connect to backend**
 ```
-Error: Failed to fetch from http://localhost:2024
-Fix: Ensure backend is running (poetry run langgraph dev)
-     Verify NEXT_PUBLIC_LANGGRAPH_API_URL in frontend/.env.local
+Error: Failed to fetch from http://localhost:8000
+Fix: Ensure backend is running (poetry run uvicorn src.main:app --reload)
+     Verify NEXT_PUBLIC_API_URL in frontend/.env.local
+     Check FastAPI logs for errors
 ```
 
-**9. PDF upload fails silently**
+**8. PDF upload fails silently**
 ```
 Error: No documents extracted
 Fix: Check PDF is not encrypted or image-only
      Check backend logs for errors
      Verify file size < 10MB
+     Check FastAPI logs: Look for ingestion errors
 ```
 
-**10. Tests fail with import errors**
+**9. Tests fail with import errors**
 ```
 Error: ModuleNotFoundError: No module named 'src'
 Fix: Run from backend/ directory: poetry run pytest
      Ensure poetry install was successful
 ```
 
-**11. `yarn install` fails**
+**10. `yarn install` fails**
 ```
 Error: Integrity check failed
 Fix: Delete node_modules and yarn.lock, then yarn install
      Or: yarn install --ignore-engines
 ```
 
-**12. LangGraph Studio doesn't open**
+**11. Chat responses not appearing in UI**
 ```
-Error: Studio UI not launching
-Fix: Open manually at https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-     Or check API docs at http://localhost:2024/docs
+Error: Messages stream but don't display
+Fix: Check browser console for SSE parsing errors
+     Verify backend sends correct event format
+     Check network tab for streaming response
+```
+
+**12. `uvicorn: command not found`**
+```
+Error: Command not found: uvicorn
+Fix: cd backend && poetry install
+     Ensure uvicorn is in pyproject.toml dependencies
 ```
 
 ## License
 
 MIT License - See LICENSE file
-
-

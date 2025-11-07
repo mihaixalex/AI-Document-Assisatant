@@ -109,14 +109,18 @@ class TestIngestDocsNode:
         assert result == {"docs": "delete"}
 
     @pytest.mark.asyncio
-    async def test_ingest_docs_no_config_raises_error(self, sample_docs):
-        """Test that ingestDocs raises error when config is missing."""
+    async def test_ingest_docs_with_none_config_uses_defaults(self, sample_docs, mock_retriever):
+        """Test that ingestDocs accepts None config and uses defaults."""
         from src.ingestion_graph.graph import ingest_docs
 
         state: IndexState = {"docs": sample_docs}
 
-        with pytest.raises(ValueError, match="Configuration required"):
-            await ingest_docs(state, None)
+        with patch("src.ingestion_graph.graph.make_retriever", return_value=mock_retriever):
+            result = await ingest_docs(state, None)
+
+        # Should succeed with default config
+        mock_retriever.add_documents.assert_called_once()
+        assert result == {"docs": "delete"}
 
     @pytest.mark.asyncio
     async def test_ingest_docs_no_docs_and_no_sample_raises_error(self, mock_retriever):

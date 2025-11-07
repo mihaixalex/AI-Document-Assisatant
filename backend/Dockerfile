@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for Python LangGraph Backend
+# Multi-stage Dockerfile for FastAPI + LangGraph Backend
 # Optimized for production deployment with minimal image size
 
 # Stage 1: Builder
@@ -52,17 +52,17 @@ COPY .env.example ./.env
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose LangGraph server port
-EXPOSE 2024
+# Expose FastAPI server port
+EXPOSE 8000
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:2024/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV LANGCHAIN_TRACING_V2=false
 
-# Command to run LangGraph server
-CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]
+# Command to run FastAPI server with uvicorn
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -10,6 +10,8 @@ import { Paperclip, ArrowUp, Loader2 } from 'lucide-react';
 import { ExamplePrompts } from '@/components/example-prompts';
 import { ChatMessage } from '@/components/chat-message';
 import { FilePreview } from '@/components/file-preview';
+import { ConversationSidebar } from '@/components/conversation-sidebar';
+import { useConversations } from '@/contexts/ConversationContext';
 import {
   AgentState,
   documentType,
@@ -22,7 +24,8 @@ import { useTheme } from 'next-themes';
 export default function Home() {
   const { resolvedTheme } = useTheme();
   const isDarkMode = resolvedTheme === 'dark';
-  const { toast } = useToast(); // Add this hook
+  const { toast } = useToast();
+  const { currentThreadId } = useConversations();
   const [messages, setMessages] = useState<
     Array<{
       role: 'user' | 'assistant';
@@ -34,19 +37,10 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null); // Track the AbortController
-  const messagesEndRef = useRef<HTMLDivElement>(null); // Add this ref
-  const lastRetrievedDocsRef = useRef<PDFDocument[]>([]); // useRef to store the last retrieved documents
-
-  useEffect(() => {
-    // Generate thread ID locally - no server call needed
-    if (!threadId) {
-      const uuid = crypto.randomUUID();
-      setThreadId(uuid);
-    }
-  }, [threadId]);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastRetrievedDocsRef = useRef<PDFDocument[]>([]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,7 +48,7 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !threadId || isLoading) return;
+    if (!input.trim() || !currentThreadId || isLoading) return;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -82,7 +76,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           message: userMessage,
-          threadId,
+          threadId: currentThreadId,
         }),
         signal: abortController.signal,
       });
@@ -313,10 +307,13 @@ export default function Home() {
         </div>
       )}
 
+      {/* Conversation sidebar */}
+      <ConversationSidebar />
+
       {/* Theme toggle button */}
       <ThemeToggle />
 
-      <main className="flex min-h-screen flex-col items-center p-4 md:p-24 max-w-5xl mx-auto w-full relative z-10">
+      <main className="flex min-h-screen flex-col items-center p-4 md:p-24 md:pl-[312px] max-w-5xl mx-auto w-full relative z-10">
         {messages.length === 0 ? (
         <>
           <div className="flex-1 flex items-center justify-center">
@@ -406,7 +403,7 @@ export default function Home() {
                 size="icon"
                 className="rounded-none h-12"
                 disabled={
-                  !input.trim() || isUploading || isLoading || !threadId
+                  !input.trim() || isUploading || isLoading || !currentThreadId
                 }
                 style={{
                   backgroundColor: 'transparent',

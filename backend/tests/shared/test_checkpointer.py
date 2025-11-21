@@ -1,4 +1,4 @@
-"""Tests for PostgresSaver checkpointer module.
+"""Tests for AsyncPostgresSaver checkpointer module.
 
 This module tests the checkpointer singleton pattern, initialization,
 and integration with LangGraph state management.
@@ -8,9 +8,9 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from src.shared.checkpointer import get_checkpointer, reset_checkpointer
+from src.shared.checkpointer import cleanup_checkpointer, get_checkpointer, reset_checkpointer
 
 
 @pytest.fixture(autouse=True)
@@ -31,10 +31,17 @@ def mock_database_url(monkeypatch):
 
 @pytest.fixture
 def mock_postgres_saver():
-    """Create a mock PostgresSaver instance."""
-    mock_saver = MagicMock(spec=PostgresSaver)
-    mock_saver.setup = AsyncMock()
-    return mock_saver
+    """Create a mock AsyncPostgresSaver instance with async context manager."""
+    # Create the actual checkpointer mock
+    mock_checkpointer = MagicMock(spec=AsyncPostgresSaver)
+    mock_checkpointer.setup = AsyncMock()
+
+    # Create a context manager mock that returns the checkpointer when entered
+    mock_context_manager = MagicMock()
+    mock_context_manager.__aenter__ = AsyncMock(return_value=mock_checkpointer)
+    mock_context_manager.__aexit__ = AsyncMock()
+
+    return mock_context_manager, mock_checkpointer
 
 
 class TestGetCheckpointer:
@@ -43,29 +50,36 @@ class TestGetCheckpointer:
     @pytest.mark.asyncio
     async def test_get_checkpointer_success(self, mock_database_url, mock_postgres_saver):
         """Test successful checkpointer initialization."""
+        mock_context_manager, mock_checkpointer = mock_postgres_saver
+
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string",
-            return_value=mock_postgres_saver,
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
+            return_value=mock_context_manager,
         ) as mock_from_conn:
             checkpointer = await get_checkpointer()
 
-            # Verify PostgresSaver was created with correct URL
+            # Verify AsyncPostgresSaver was created with correct URL
             mock_from_conn.assert_called_once_with(mock_database_url)
 
-            # Verify setup was called
-            mock_postgres_saver.setup.assert_called_once()
+            # Verify __aenter__ was called to enter the context manager
+            mock_context_manager.__aenter__.assert_called_once()
+
+            # Verify setup was called on the actual checkpointer
+            mock_checkpointer.setup.assert_called_once()
 
             # Verify correct instance returned
-            assert checkpointer is mock_postgres_saver
+            assert checkpointer is mock_checkpointer
 
     @pytest.mark.asyncio
     async def test_get_checkpointer_singleton_pattern(
         self, mock_database_url, mock_postgres_saver
     ):
         """Test that get_checkpointer returns the same instance on multiple calls."""
+        mock_context_manager, mock_checkpointer = mock_postgres_saver
+
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string",
-            return_value=mock_postgres_saver,
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
+            return_value=mock_context_manager,
         ):
             checkpointer1 = await get_checkpointer()
             checkpointer2 = await get_checkpointer()
@@ -73,8 +87,11 @@ class TestGetCheckpointer:
             # Verify same instance
             assert checkpointer1 is checkpointer2
 
+            # Verify __aenter__ only called once (singleton pattern)
+            assert mock_context_manager.__aenter__.call_count == 1
+
             # Verify setup only called once
-            assert mock_postgres_saver.setup.call_count == 1
+            assert mock_checkpointer.setup.call_count == 1
 
     @pytest.mark.asyncio
     async def test_get_checkpointer_missing_database_url(self, monkeypatch):
@@ -88,11 +105,16 @@ class TestGetCheckpointer:
     @pytest.mark.asyncio
     async def test_get_checkpointer_setup_failure(self, mock_database_url):
         """Test that initialization errors are propagated correctly."""
-        mock_saver = MagicMock(spec=PostgresSaver)
-        mock_saver.setup = AsyncMock(side_effect=Exception("Database connection failed"))
+        mock_checkpointer = MagicMock(spec=AsyncPostgresSaver)
+        mock_checkpointer.setup = AsyncMock(side_effect=Exception("Database connection failed"))
+
+        mock_context_manager = MagicMock()
+        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_checkpointer)
+        mock_context_manager.__aexit__ = AsyncMock()
 
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string", return_value=mock_saver
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
+            return_value=mock_context_manager,
         ):
             with pytest.raises(Exception, match="Database connection failed"):
                 await get_checkpointer()
@@ -101,7 +123,7 @@ class TestGetCheckpointer:
     async def test_get_checkpointer_from_conn_string_failure(self, mock_database_url):
         """Test that from_conn_string errors are propagated correctly."""
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string",
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
             side_effect=Exception("Invalid connection string"),
         ):
             with pytest.raises(Exception, match="Invalid connection string"):
@@ -116,9 +138,11 @@ class TestResetCheckpointer:
         self, mock_database_url, mock_postgres_saver
     ):
         """Test that reset_checkpointer clears the singleton instance."""
+        mock_context_manager, mock_checkpointer = mock_postgres_saver
+
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string",
-            return_value=mock_postgres_saver,
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
+            return_value=mock_context_manager,
         ):
             # Get initial instance
             checkpointer1 = await get_checkpointer()
@@ -129,14 +153,16 @@ class TestResetCheckpointer:
             # Get new instance
             checkpointer2 = await get_checkpointer()
 
-            # Verify different instances
-            # (In mock, they'll be the same mock object, but setup will be called twice)
-            assert mock_postgres_saver.setup.call_count == 2
+            # Verify __aenter__ called twice (once for each get_checkpointer)
+            assert mock_context_manager.__aenter__.call_count == 2
+
+            # Verify setup called twice
+            assert mock_checkpointer.setup.call_count == 2
 
 
 @pytest.mark.integration
 class TestCheckpointerIntegration:
-    """Integration tests for checkpointer with real PostgresSaver.
+    """Integration tests for checkpointer with real AsyncPostgresSaver.
 
     These tests require a valid DATABASE_URL to be set and will create
     real database connections. They are marked as integration tests
@@ -145,7 +171,7 @@ class TestCheckpointerIntegration:
 
     @pytest.mark.asyncio
     async def test_checkpointer_real_initialization(self):
-        """Test checkpointer initialization with real PostgresSaver.
+        """Test checkpointer initialization with real AsyncPostgresSaver.
 
         This test requires DATABASE_URL to be set to a valid PostgreSQL connection string.
         """
@@ -160,8 +186,8 @@ class TestCheckpointerIntegration:
             # Get checkpointer
             checkpointer = await get_checkpointer()
 
-            # Verify it's a PostgresSaver instance
-            assert isinstance(checkpointer, PostgresSaver)
+            # Verify it's an AsyncPostgresSaver instance
+            assert isinstance(checkpointer, AsyncPostgresSaver)
 
             # Verify singleton pattern
             checkpointer2 = await get_checkpointer()
@@ -262,7 +288,7 @@ class TestCheckpointerErrorHandling:
         monkeypatch.setenv("DATABASE_URL", "invalid://url")
 
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string",
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
             side_effect=ValueError("Invalid connection string format"),
         ):
             with pytest.raises(ValueError, match="Invalid connection string format"):
@@ -273,9 +299,11 @@ class TestCheckpointerErrorHandling:
         """Test that concurrent calls to get_checkpointer don't create multiple instances."""
         import asyncio
 
+        mock_context_manager, mock_checkpointer = mock_postgres_saver
+
         with patch(
-            "src.shared.checkpointer.PostgresSaver.from_conn_string",
-            return_value=mock_postgres_saver,
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
+            return_value=mock_context_manager,
         ):
             # Call get_checkpointer concurrently
             results = await asyncio.gather(
@@ -286,5 +314,32 @@ class TestCheckpointerErrorHandling:
             assert results[0] is results[1]
             assert results[1] is results[2]
 
+            # Verify __aenter__ only called once (singleton pattern with concurrency)
+            assert mock_context_manager.__aenter__.call_count == 1
+
             # Verify setup only called once
-            assert mock_postgres_saver.setup.call_count == 1
+            assert mock_checkpointer.setup.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cleanup_checkpointer(self, mock_database_url, mock_postgres_saver):
+        """Test cleanup_checkpointer properly exits the context manager."""
+        mock_context_manager, mock_checkpointer = mock_postgres_saver
+
+        with patch(
+            "src.shared.checkpointer.AsyncPostgresSaver.from_conn_string",
+            return_value=mock_context_manager,
+        ):
+            # Initialize checkpointer
+            checkpointer = await get_checkpointer()
+            assert checkpointer is mock_checkpointer
+
+            # Cleanup checkpointer
+            await cleanup_checkpointer()
+
+            # Verify __aexit__ was called
+            mock_context_manager.__aexit__.assert_called_once_with(None, None, None)
+
+            # Verify singleton is reset (next call will reinitialize)
+            checkpointer2 = await get_checkpointer()
+            # __aenter__ should be called twice now
+            assert mock_context_manager.__aenter__.call_count == 2

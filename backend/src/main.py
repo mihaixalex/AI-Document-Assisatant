@@ -143,8 +143,19 @@ async def shutdown_event() -> None:
     FastAPI shutdown event handler.
 
     Cleanup resources on application shutdown:
+    - Close the checkpointer connection pool
     - Close the conversation repository connection pool
     """
+    # Close checkpointer connection pool
+    try:
+        from src.shared.checkpointer import cleanup_checkpointer
+
+        await cleanup_checkpointer()
+        logger.info("Successfully closed checkpointer connection pool")
+    except Exception as e:
+        logger.warning("Failed to close checkpointer pool: %s", e)
+
+    # Close conversation repository connection pool
     try:
         from src.conversations.repository import get_repository
 

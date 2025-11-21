@@ -14,11 +14,11 @@ from src.shared.checkpointer import get_checkpointer, reset_checkpointer
 
 
 @pytest.fixture(autouse=True)
-def reset_singleton():
+async def reset_singleton():
     """Reset checkpointer singleton before each test."""
-    reset_checkpointer()
+    await reset_checkpointer()
     yield
-    reset_checkpointer()
+    await reset_checkpointer()
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ class TestGetCheckpointer:
         # Remove DATABASE_URL from environment
         monkeypatch.delenv("DATABASE_URL", raising=False)
 
-        with pytest.raises(ValueError, match="DATABASE_URL environment variable is not set"):
+        with pytest.raises(ValueError, match="DATABASE_URL environment variable is required"):
             await get_checkpointer()
 
     @pytest.mark.asyncio
@@ -124,7 +124,7 @@ class TestResetCheckpointer:
             checkpointer1 = await get_checkpointer()
 
             # Reset singleton
-            reset_checkpointer()
+            await reset_checkpointer()
 
             # Get new instance
             checkpointer2 = await get_checkpointer()
@@ -154,7 +154,7 @@ class TestCheckpointerIntegration:
             pytest.skip("DATABASE_URL not set, skipping integration test")
 
         # Reset singleton to ensure clean state
-        reset_checkpointer()
+        await reset_checkpointer()
 
         try:
             # Get checkpointer
@@ -182,7 +182,7 @@ class TestCheckpointerIntegration:
             pytest.skip("DATABASE_URL not set, skipping integration test")
 
         # Reset singleton
-        reset_checkpointer()
+        await reset_checkpointer()
 
         try:
             # Import graph modules
@@ -211,7 +211,7 @@ class TestCheckpointerIntegration:
             pytest.skip("DATABASE_URL not set, skipping integration test")
 
         # Reset singleton
-        reset_checkpointer()
+        await reset_checkpointer()
 
         try:
             from langchain_core.runnables import RunnableConfig

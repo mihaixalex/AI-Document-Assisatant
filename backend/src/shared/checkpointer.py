@@ -1,18 +1,11 @@
-"""PostgresSaver checkpointer module with singleton pattern.
+"""
+PostgresSaver checkpointer module for conversation persistence.
 
-This module provides a singleton instance of PostgresSaver for maintaining
-conversation state across graph executions. The checkpointer:
-- Stores conversation history and state snapshots
-- Enables resume/replay functionality
-- Maintains thread-based conversation isolation
-
-Usage:
-    from src.shared.checkpointer import get_checkpointer
-
-    checkpointer = await get_checkpointer()
-    graph = builder.compile(checkpointer=checkpointer)
+This module provides a singleton PostgresSaver instance that enables
+LangGraph state persistence across sessions using PostgreSQL.
 """
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -21,25 +14,29 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 logger = logging.getLogger(__name__)
 
-# Singleton instance
 _checkpointer_instance: Optional[PostgresSaver] = None
+_lock = asyncio.Lock()
 
 
 async def get_checkpointer() -> PostgresSaver:
     """
-    Get or create a singleton PostgresSaver checkpointer instance.
+    Returns singleton PostgresSaver instance initialized from DATABASE_URL.
 
-    This function implements the singleton pattern to ensure only one
-    checkpointer instance exists throughout the application lifecycle.
+    Thread-safe async singleton pattern using asyncio.Lock with double-check locking.
+    This ensures only one PostgresSaver instance is created even with concurrent calls.
 
-    The checkpointer automatically creates required database tables on
-    first initialization via PostgresSaver.setup().
+    PostgresSaver.setup() creates the following tables:
+    - checkpoints: Stores graph state snapshots
+    - checkpoint_writes: Stores pending writes
+
+    These tables are separate from application tables (conversations, documents)
+    managed by Alembic migrations.
 
     Returns:
-        PostgresSaver: The singleton checkpointer instance.
+        PostgresSaver: Singleton checkpointer instance
 
     Raises:
-        ValueError: If DATABASE_URL environment variable is not set.
+        ValueError: If DATABASE_URL environment variable is not set or initialization fails
 
     Example:
         >>> checkpointer = await get_checkpointer()
@@ -47,47 +44,51 @@ async def get_checkpointer() -> PostgresSaver:
     """
     global _checkpointer_instance
 
-    # Return existing instance if already created
+    # Fast path: return existing instance without acquiring lock
     if _checkpointer_instance is not None:
         return _checkpointer_instance
 
-    # Get database URL from environment
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        raise ValueError(
-            "DATABASE_URL environment variable is not set. "
-            "Please set it to your PostgreSQL connection string."
-        )
+    # Slow path: acquire lock and initialize
+    async with _lock:
+        # Double-check pattern: recheck after acquiring lock
+        if _checkpointer_instance is not None:
+            return _checkpointer_instance
 
-    logger.info("Initializing PostgresSaver checkpointer from DATABASE_URL")
+        database_url = os.environ.get("DATABASE_URL")
+        if not database_url:
+            raise ValueError(
+                "DATABASE_URL environment variable is required for conversation persistence"
+            )
 
-    try:
-        # Create PostgresSaver instance from connection string
-        checkpointer = PostgresSaver.from_conn_string(database_url)
+        try:
+            logger.info("Initializing PostgresSaver checkpointer")
+            checkpointer = PostgresSaver.from_conn_string(database_url)
+            await checkpointer.setup()
+            _checkpointer_instance = checkpointer
+            logger.info("PostgresSaver checkpointer initialized successfully")
+            return _checkpointer_instance
+        except Exception as e:
+            # Reset to None on failure to allow retry
+            _checkpointer_instance = None
+            logger.error(f"Failed to initialize PostgresSaver: {str(e)}", exc_info=True)
+            raise ValueError(
+                f"Failed to initialize PostgresSaver: {e}. "
+                "Verify DATABASE_URL is correct and the database is accessible."
+            ) from e
 
-        # Setup database tables (idempotent operation)
-        await checkpointer.setup()
 
-        # Store as singleton
-        _checkpointer_instance = checkpointer
-
-        logger.info("PostgresSaver checkpointer initialized successfully")
-        return _checkpointer_instance
-
-    except Exception as e:
-        logger.error(f"Failed to initialize PostgresSaver: {str(e)}", exc_info=True)
-        raise
-
-
-def reset_checkpointer() -> None:
+async def reset_checkpointer() -> None:
     """
-    Reset the singleton checkpointer instance.
+    Reset the singleton checkpointer instance (for testing only).
 
-    This function is primarily for testing purposes, allowing tests to
-    reset the singleton state between test runs.
+    This function should only be called in test environments to reset
+    the singleton state between tests.
 
     Warning:
-        This should only be used in tests, not in production code.
+        Do not call this function in production code as it will invalidate
+        the checkpointer instance and force reinitialization.
     """
     global _checkpointer_instance
-    _checkpointer_instance = None
+    async with _lock:
+        _checkpointer_instance = None
+        logger.info("Checkpointer instance reset")

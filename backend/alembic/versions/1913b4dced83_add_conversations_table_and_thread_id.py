@@ -1,88 +1,81 @@
-"""add_conversations_table_and_thread_id
+"""add conversations table and thread_id
 
 Revision ID: 1913b4dced83
-Revises: 
-Create Date: 2025-11-21 15:17:21.485214
+Revises:
+Create Date: 2025-01-21 14:23:45.123456
 
 """
-from typing import Sequence, Union
-
 from alembic import op
 import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '1913b4dced83'
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision = '1913b4dced83'
+down_revision = None
+branch_labels = None
+depends_on = None
 
 
 def upgrade() -> None:
-    """Upgrade schema.
+    """
+    Create conversations table and add thread_id column to documents table.
 
-    Creates:
-    1. conversations table for managing chat history metadata
-    2. thread_id column in documents table with index
-
-    Note: PostgresSaver checkpoint tables (checkpoints, writes) are created
-    automatically by PostgresSaver.setup() and are NOT managed by Alembic.
+    This migration supports conversation persistence by:
+    1. Creating a conversations table to store conversation metadata
+    2. Adding a thread_id column to documents for per-conversation isolation
+    3. Adding a foreign key constraint to ensure referential integrity
     """
     # Create conversations table
     op.create_table(
         'conversations',
-        sa.Column('id', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('thread_id', sa.String(length=255), nullable=False),
         sa.Column('title', sa.String(length=500), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
+        sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('user_id', sa.String(length=255), nullable=True),
-        sa.Column('is_deleted', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+        sa.Column('is_deleted', sa.Boolean(), server_default=sa.text('false'), nullable=False),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('thread_id', name='uq_conversations_thread_id')
     )
 
-    # Create index on thread_id for faster lookups
+    # Create indexes on conversations table
     op.create_index('ix_conversations_thread_id', 'conversations', ['thread_id'])
-
-    # Create index on user_id for filtering by user
     op.create_index('ix_conversations_user_id', 'conversations', ['user_id'])
-
-    # Create index on created_at for sorting
     op.create_index('ix_conversations_created_at', 'conversations', ['created_at'])
 
-    # Add thread_id column to documents table if it exists
-    # Using batch_alter_table to check if table exists first
-    try:
-        op.add_column('documents', sa.Column('thread_id', sa.String(length=255), nullable=True))
+    # Add thread_id column to documents table
+    op.add_column('documents', sa.Column('thread_id', sa.String(length=255), nullable=True))
 
-        # Create index on documents.thread_id
-        op.create_index('ix_documents_thread_id', 'documents', ['thread_id'])
-    except Exception:
-        # If documents table doesn't exist yet, skip this step
-        # The Supabase vector store will create it when first used
-        pass
+    # Add foreign key constraint from documents.thread_id to conversations.thread_id
+    # Using SET NULL on delete to preserve documents when conversation is soft-deleted
+    op.create_foreign_key(
+        'fk_documents_thread_id_conversations',
+        'documents', 'conversations',
+        ['thread_id'], ['thread_id'],
+        ondelete='SET NULL'
+    )
+
+    # Create index on documents.thread_id for query performance
+    op.create_index('ix_documents_thread_id', 'documents', ['thread_id'])
 
 
 def downgrade() -> None:
-    """Downgrade schema.
-
-    Removes:
-    1. thread_id column and index from documents table
-    2. conversations table and all its indexes
     """
-    # Drop indexes and column from documents table if they exist
+    Reverse the migration by dropping the foreign key constraint,
+    indexes, thread_id column, and conversations table.
+    """
+    # Drop foreign key constraint, index, and column from documents table
     try:
+        op.drop_constraint('fk_documents_thread_id_conversations', 'documents', type_='foreignkey')
         op.drop_index('ix_documents_thread_id', table_name='documents')
         op.drop_column('documents', 'thread_id')
     except Exception:
-        # If table or column doesn't exist, skip
+        # Handle case where documents table might not exist or constraints already dropped
         pass
 
-    # Drop conversations table indexes
+    # Drop indexes and table for conversations
     op.drop_index('ix_conversations_created_at', table_name='conversations')
     op.drop_index('ix_conversations_user_id', table_name='conversations')
     op.drop_index('ix_conversations_thread_id', table_name='conversations')
-
-    # Drop conversations table
     op.drop_table('conversations')

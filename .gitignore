@@ -16,7 +16,9 @@ claude.md
 
 #Docs
 ARCHITECTURE.md
-#prd-chat-history-persistence.md
+prd-chat-history-persistence.md
+prompt.md
+prd-analysis-chat-history.md
 
 #CODEX
 AGENTS.md

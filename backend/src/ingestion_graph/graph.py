@@ -63,9 +63,10 @@ async def ingest_docs(state: IndexState, config: RunnableConfig) -> dict:
         # Process existing docs through reducer to ensure proper format
         docs = reduce_docs([], docs)
 
-    # Get retriever and add documents
+    # Get retriever and add documents to the underlying vector store
     retriever = await make_retriever(config)
-    result = retriever.add_documents(docs)
+    # Access the vector store through the retriever's vectorstore property
+    result = retriever.vectorstore.add_documents(docs)
 
     if isawaitable(result):
         await result

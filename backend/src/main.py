@@ -206,8 +206,10 @@ async def ingest_documents(
     except HTTPException:
         raise
     except Exception as e:
-        # Sanitize error message to avoid leaking internals
-        raise HTTPException(status_code=500, detail="Document ingestion failed")
+        # Log the full error with stack trace for debugging
+        logger.error(f"Ingestion failed for {file.filename}: {str(e)}", exc_info=True)
+        # Return detailed error message for debugging (sanitize in production)
+        raise HTTPException(status_code=500, detail=f"Document ingestion failed: {str(e)}")
     finally:
         # Clean up temporary file
         if temp_file_path and os.path.exists(temp_file_path):

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConversationBase(BaseModel):
@@ -45,11 +45,7 @@ class ConversationResponse(BaseModel):
     user_id: str | None = Field(default=None, alias="userId", description="User identifier")
     is_deleted: bool = Field(..., alias="isDeleted", description="Soft delete flag")
 
-    class Config:
-        """Pydantic config for JSON serialization."""
-
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
 class ConversationListResponse(BaseModel):
@@ -70,10 +66,7 @@ class ConversationHistoryResponse(BaseModel):
         default_factory=dict, description="Additional checkpoint metadata"
     )
 
-    class Config:
-        """Pydantic config for JSON serialization."""
-
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class DeleteResponse(BaseModel):
@@ -83,7 +76,4 @@ class DeleteResponse(BaseModel):
     message: str = Field(..., description="Success message")
     thread_id: str = Field(..., alias="threadId", description="Deleted thread identifier")
 
-    class Config:
-        """Pydantic config for JSON serialization."""
-
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)

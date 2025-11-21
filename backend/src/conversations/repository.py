@@ -12,6 +12,7 @@ from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,19 @@ class ConversationRepository:
             database_url: PostgreSQL connection URL
         """
         self.database_url = database_url
+        self._pool: AsyncConnectionPool | None = None
+
+    async def _get_pool(self) -> AsyncConnectionPool:
+        """Get or create the connection pool.
+
+        Returns:
+            AsyncConnectionPool instance
+        """
+        if self._pool is None:
+            self._pool = AsyncConnectionPool(
+                self.database_url, min_size=2, max_size=10, kwargs={"row_factory": dict_row}
+            )
+        return self._pool
 
     async def list_conversations(
         self, limit: int = 50, offset: int = 0, include_deleted: bool = False
@@ -46,27 +60,36 @@ class ConversationRepository:
         Returns:
             Tuple of (conversations list, total count)
         """
-        async with await psycopg.AsyncConnection.connect(
-            self.database_url, row_factory=dict_row
-        ) as conn:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                # Build WHERE clause
-                where_clause = "" if include_deleted else "WHERE is_deleted = false"
+                # Use static queries to prevent SQL injection
+                if include_deleted:
+                    count_query = "SELECT COUNT(*) as count FROM conversations"
+                    list_query = """
+                        SELECT id, thread_id, title, created_at, updated_at, user_id, is_deleted
+                        FROM conversations
+                        ORDER BY updated_at DESC
+                        LIMIT %s OFFSET %s
+                    """
+                else:
+                    count_query = (
+                        "SELECT COUNT(*) as count FROM conversations WHERE is_deleted = false"
+                    )
+                    list_query = """
+                        SELECT id, thread_id, title, created_at, updated_at, user_id, is_deleted
+                        FROM conversations
+                        WHERE is_deleted = false
+                        ORDER BY updated_at DESC
+                        LIMIT %s OFFSET %s
+                    """
 
                 # Get total count
-                count_query = f"SELECT COUNT(*) as count FROM conversations {where_clause}"
                 await cur.execute(count_query)
                 count_result = await cur.fetchone()
                 total = count_result["count"] if count_result else 0
 
-                # Get paginated results ordered by updated_at DESC
-                list_query = f"""
-                    SELECT id, thread_id, title, created_at, updated_at, user_id, is_deleted
-                    FROM conversations
-                    {where_clause}
-                    ORDER BY updated_at DESC
-                    LIMIT %s OFFSET %s
-                """
+                # Get paginated results
                 await cur.execute(list_query, (limit, offset))
                 conversations = await cur.fetchall()
 
@@ -84,23 +107,27 @@ class ConversationRepository:
         # Generate server-side UUID for thread_id
         thread_id = str(uuid.uuid4())
 
-        async with await psycopg.AsyncConnection.connect(
-            self.database_url, row_factory=dict_row
-        ) as conn:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                query = """
-                    INSERT INTO conversations (thread_id, title, created_at, updated_at, is_deleted)
-                    VALUES (%s, %s, NOW(), NOW(), false)
-                    RETURNING id, thread_id, title, created_at, updated_at, user_id, is_deleted
-                """
-                await cur.execute(query, (thread_id, title))
-                result = await cur.fetchone()
-                await conn.commit()
+                try:
+                    query = """
+                        INSERT INTO conversations (thread_id, title, created_at, updated_at, is_deleted)
+                        VALUES (%s, %s, NOW(), NOW(), false)
+                        RETURNING id, thread_id, title, created_at, updated_at, user_id, is_deleted
+                    """
+                    await cur.execute(query, (thread_id, title))
+                    result = await cur.fetchone()
 
-                if not result:
-                    raise ValueError("Failed to create conversation")
+                    if not result:
+                        raise ValueError("Failed to create conversation")
 
-                return dict(result)
+                    await conn.commit()
+                    return dict(result)
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error("Failed to create conversation: %s", e)
+                    raise
 
     async def get_conversation(self, thread_id: str) -> dict[str, Any] | None:
         """Get a conversation by thread_id.
@@ -111,9 +138,8 @@ class ConversationRepository:
         Returns:
             Conversation record as dict or None if not found
         """
-        async with await psycopg.AsyncConnection.connect(
-            self.database_url, row_factory=dict_row
-        ) as conn:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 query = """
                     SELECT id, thread_id, title, created_at, updated_at, user_id, is_deleted
@@ -134,21 +160,25 @@ class ConversationRepository:
         Returns:
             Updated conversation record as dict or None if not found
         """
-        async with await psycopg.AsyncConnection.connect(
-            self.database_url, row_factory=dict_row
-        ) as conn:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                query = """
-                    UPDATE conversations
-                    SET title = %s, updated_at = NOW()
-                    WHERE thread_id = %s AND is_deleted = false
-                    RETURNING id, thread_id, title, created_at, updated_at, user_id, is_deleted
-                """
-                await cur.execute(query, (title, thread_id))
-                result = await cur.fetchone()
-                await conn.commit()
+                try:
+                    query = """
+                        UPDATE conversations
+                        SET title = %s, updated_at = NOW()
+                        WHERE thread_id = %s AND is_deleted = false
+                        RETURNING id, thread_id, title, created_at, updated_at, user_id, is_deleted
+                    """
+                    await cur.execute(query, (title, thread_id))
+                    result = await cur.fetchone()
 
-                return dict(result) if result else None
+                    await conn.commit()
+                    return dict(result) if result else None
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error("Failed to update conversation: %s", e)
+                    raise
 
     async def soft_delete_conversation(self, thread_id: str) -> bool:
         """Soft delete a conversation by setting is_deleted flag.
@@ -159,21 +189,31 @@ class ConversationRepository:
         Returns:
             True if conversation was deleted, False if not found
         """
-        async with await psycopg.AsyncConnection.connect(
-            self.database_url, row_factory=dict_row
-        ) as conn:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                query = """
-                    UPDATE conversations
-                    SET is_deleted = true, updated_at = NOW()
-                    WHERE thread_id = %s AND is_deleted = false
-                    RETURNING id
-                """
-                await cur.execute(query, (thread_id,))
-                result = await cur.fetchone()
-                await conn.commit()
+                try:
+                    query = """
+                        UPDATE conversations
+                        SET is_deleted = true, updated_at = NOW()
+                        WHERE thread_id = %s AND is_deleted = false
+                        RETURNING id
+                    """
+                    await cur.execute(query, (thread_id,))
+                    result = await cur.fetchone()
 
-                return result is not None
+                    await conn.commit()
+                    return result is not None
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error("Failed to delete conversation: %s", e)
+                    raise
+
+    async def close(self) -> None:
+        """Close the connection pool and release resources."""
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
 
 
 def get_repository() -> ConversationRepository:

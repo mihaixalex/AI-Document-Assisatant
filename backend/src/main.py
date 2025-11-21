@@ -137,6 +137,24 @@ async def startup_event() -> None:
         # Graphs will continue to use the default compiled versions without checkpointer
 
 
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """
+    FastAPI shutdown event handler.
+
+    Cleanup resources on application shutdown:
+    - Close the conversation repository connection pool
+    """
+    try:
+        from src.conversations.repository import get_repository
+
+        repository = get_repository()
+        await repository.close()
+        logger.info("Successfully closed conversation repository connection pool")
+    except Exception as e:
+        logger.warning("Failed to close conversation repository pool: %s", e)
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """

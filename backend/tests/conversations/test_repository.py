@@ -60,7 +60,8 @@ class TestConversationRepository:
             for i in range(3)
         ]
 
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -71,10 +72,9 @@ class TestConversationRepository:
 
             # Mock connection context managers
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             # Call repository method
             conversations, total = await repository.list_conversations(limit=10, offset=0)
@@ -92,7 +92,8 @@ class TestConversationRepository:
         self, repository: ConversationRepository
     ) -> None:
         """Test listing conversations includes deleted when requested."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -101,10 +102,9 @@ class TestConversationRepository:
             mock_cursor.fetchall = AsyncMock(return_value=[])
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             # Call with include_deleted=True
             conversations, total = await repository.list_conversations(
@@ -121,7 +121,8 @@ class TestConversationRepository:
         self, repository: ConversationRepository, sample_conversation: dict
     ) -> None:
         """Test creating a new conversation."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -130,10 +131,9 @@ class TestConversationRepository:
             mock_conn.commit = AsyncMock()
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             # Create conversation
             result = await repository.create_conversation(title="Test Conversation")
@@ -153,7 +153,8 @@ class TestConversationRepository:
         self, repository: ConversationRepository
     ) -> None:
         """Test creating a conversation without a title."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -172,10 +173,9 @@ class TestConversationRepository:
             mock_conn.commit = AsyncMock()
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.create_conversation(title=None)
 
@@ -183,11 +183,45 @@ class TestConversationRepository:
             assert result["thread_id"] is not None
 
     @pytest.mark.asyncio
+    async def test_create_conversation_db_failure(self, repository: ConversationRepository) -> None:
+        """Test handling of database insert failure."""
+        # Create a properly async context manager mock
+        from unittest.mock import AsyncMock as AM
+
+        mock_cursor = MagicMock()
+        mock_cursor.execute = AsyncMock()
+        mock_cursor.fetchone = AsyncMock(return_value=None)  # Simulate failure
+
+        mock_cursor_context = MagicMock()
+        mock_cursor_context.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor_context.__aexit__ = AsyncMock(return_value=None)
+
+        mock_conn = MagicMock()
+        mock_conn.cursor = MagicMock(return_value=mock_cursor_context)
+        mock_conn.commit = AsyncMock()
+        mock_conn.rollback = AsyncMock()
+
+        mock_conn_context = MagicMock()
+        mock_conn_context.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn_context.__aexit__ = AsyncMock(return_value=None)
+
+        mock_pool = MagicMock()
+        mock_pool.connection = MagicMock(return_value=mock_conn_context)
+
+        with patch.object(repository, "_get_pool", return_value=mock_pool):
+            with pytest.raises(ValueError, match="Failed to create conversation"):
+                await repository.create_conversation(title="Test")
+
+            # Verify rollback was called
+            mock_conn.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_get_conversation_success(
         self, repository: ConversationRepository, sample_conversation: dict
     ) -> None:
         """Test getting a conversation by thread_id."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -195,10 +229,9 @@ class TestConversationRepository:
             mock_cursor.fetchone = AsyncMock(return_value=sample_conversation)
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.get_conversation("test-thread-123")
 
@@ -209,7 +242,8 @@ class TestConversationRepository:
     @pytest.mark.asyncio
     async def test_get_conversation_not_found(self, repository: ConversationRepository) -> None:
         """Test getting a non-existent conversation."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -217,10 +251,9 @@ class TestConversationRepository:
             mock_cursor.fetchone = AsyncMock(return_value=None)
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.get_conversation("non-existent")
 
@@ -233,7 +266,8 @@ class TestConversationRepository:
         """Test updating a conversation's title."""
         updated_conversation = {**sample_conversation, "title": "Updated Title"}
 
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -242,10 +276,9 @@ class TestConversationRepository:
             mock_conn.commit = AsyncMock()
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.update_conversation("test-thread-123", "Updated Title")
 
@@ -256,7 +289,8 @@ class TestConversationRepository:
     @pytest.mark.asyncio
     async def test_update_conversation_not_found(self, repository: ConversationRepository) -> None:
         """Test updating a non-existent conversation."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -265,10 +299,9 @@ class TestConversationRepository:
             mock_conn.commit = AsyncMock()
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.update_conversation("non-existent", "New Title")
 
@@ -279,7 +312,8 @@ class TestConversationRepository:
         self, repository: ConversationRepository
     ) -> None:
         """Test soft deleting a conversation."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -288,10 +322,9 @@ class TestConversationRepository:
             mock_conn.commit = AsyncMock()
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.soft_delete_conversation("test-thread-123")
 
@@ -308,7 +341,8 @@ class TestConversationRepository:
         self, repository: ConversationRepository
     ) -> None:
         """Test soft deleting a non-existent conversation."""
-        with patch("psycopg.AsyncConnection.connect") as mock_connect:
+        with patch.object(repository, "_get_pool") as mock_get_pool:
+            mock_pool = MagicMock()
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
 
@@ -317,10 +351,9 @@ class TestConversationRepository:
             mock_conn.commit = AsyncMock()
 
             mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-            mock_conn.__aenter__.return_value = mock_conn
-            mock_conn.__aexit__.return_value = AsyncMock()
-
-            mock_connect.return_value = mock_conn
+            mock_pool.connection.return_value.__aenter__.return_value = mock_conn
+            mock_pool.connection.return_value.__aexit__.return_value = AsyncMock()
+            mock_get_pool.return_value = mock_pool
 
             result = await repository.soft_delete_conversation("non-existent")
 

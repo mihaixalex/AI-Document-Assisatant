@@ -11,7 +11,7 @@ This module defines REST API endpoints for:
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from langchain_core.runnables import RunnableConfig
 
 from src.conversations.models import (
@@ -58,7 +58,7 @@ async def list_conversations(
             conversations=conversation_models, total=total, limit=limit, offset=offset
         )
     except Exception as e:
-        logger.error(f"Failed to list conversations: {str(e)}", exc_info=True)
+        logger.error("Failed to list conversations: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to list conversations: {str(e)}"
         ) from e
@@ -84,7 +84,7 @@ async def create_conversation(
         conversation = await repository.create_conversation(title=request.title)
         return ConversationResponse(**conversation)
     except Exception as e:
-        logger.error(f"Failed to create conversation: {str(e)}", exc_info=True)
+        logger.error("Failed to create conversation: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to create conversation: {str(e)}"
         ) from e
@@ -92,7 +92,7 @@ async def create_conversation(
 
 @router.get("/{thread_id}/history", response_model=ConversationHistoryResponse)
 async def get_conversation_history(
-    thread_id: str,
+    thread_id: Annotated[str, Path(min_length=1, max_length=100)],
     repository: ConversationRepository = Depends(get_repository),
 ) -> ConversationHistoryResponse:
     """Load conversation history from LangGraph checkpointer.
@@ -163,16 +163,22 @@ async def get_conversation_history(
                 threadId=thread_id, messages=messages, metadata=metadata_dict
             )
         except Exception as checkpoint_error:
-            # Log error but return empty state (don't crash)
-            logger.warning(
-                f"Failed to load checkpoint for thread {thread_id}: {str(checkpoint_error)}"
-            )
+            # Distinguish error types for better debugging
+            error_msg = str(checkpoint_error).lower()
+            if "not found" in error_msg or "does not exist" in error_msg:
+                logger.info("No checkpoint found for thread %s, returning empty state", thread_id)
+            else:
+                logger.warning(
+                    "Failed to load checkpoint for thread %s: %s",
+                    thread_id,
+                    str(checkpoint_error),
+                )
             return ConversationHistoryResponse(threadId=thread_id, messages=[], metadata={})
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get conversation history: {str(e)}", exc_info=True)
+        logger.error("Failed to get conversation history: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to get conversation history: {str(e)}"
         ) from e
@@ -180,7 +186,7 @@ async def get_conversation_history(
 
 @router.patch("/{thread_id}", response_model=ConversationResponse)
 async def update_conversation(
-    thread_id: str,
+    thread_id: Annotated[str, Path(min_length=1, max_length=100)],
     request: ConversationUpdate,
     repository: ConversationRepository = Depends(get_repository),
 ) -> ConversationResponse:
@@ -208,7 +214,7 @@ async def update_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update conversation: {str(e)}", exc_info=True)
+        logger.error("Failed to update conversation: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to update conversation: {str(e)}"
         ) from e
@@ -216,7 +222,7 @@ async def update_conversation(
 
 @router.delete("/{thread_id}", response_model=DeleteResponse)
 async def delete_conversation(
-    thread_id: str,
+    thread_id: Annotated[str, Path(min_length=1, max_length=100)],
     repository: ConversationRepository = Depends(get_repository),
 ) -> DeleteResponse:
     """Soft delete a conversation by setting is_deleted flag.
@@ -249,7 +255,7 @@ async def delete_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete conversation: {str(e)}", exc_info=True)
+        logger.error("Failed to delete conversation: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to delete conversation: {str(e)}"
         ) from e

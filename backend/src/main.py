@@ -38,8 +38,12 @@ from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from src.ingestion_graph.graph import graph as ingestion_graph
-from src.retrieval_graph.graph import graph as retrieval_graph
+from src.ingestion_graph import graph as ingestion_graph_module
+from src.retrieval_graph import graph as retrieval_graph_module
+
+# Import the initial graphs (will be replaced with checkpointer versions on startup)
+ingestion_graph = ingestion_graph_module.graph
+retrieval_graph = retrieval_graph_module.graph
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -98,6 +102,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """
+    FastAPI startup event handler.
+
+    Initializes the PostgresSaver checkpointer and recompiles both graphs
+    with persistence enabled. This ensures conversation history is maintained
+    across requests.
+
+    If DATABASE_URL is not set or checkpointer initialization fails,
+    the graphs will continue to work without persistence.
+    """
+    global ingestion_graph, retrieval_graph
+
+    try:
+        logger.info("Initializing PostgresSaver checkpointer for graphs...")
+
+        # Recompile both graphs with checkpointer
+        ingestion_graph = await ingestion_graph_module.compile_with_checkpointer()
+        retrieval_graph = await retrieval_graph_module.compile_with_checkpointer()
+
+        logger.info("Successfully initialized checkpointer for both graphs")
+    except Exception as e:
+        logger.warning(
+            f"Failed to initialize checkpointer, graphs will run without persistence: {e}"
+        )
+        # Graphs will continue to use the default compiled versions without checkpointer
 
 
 @app.get("/health", response_model=HealthResponse)

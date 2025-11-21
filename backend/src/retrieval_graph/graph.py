@@ -251,5 +251,29 @@ builder.add_edge("generateResponse", END)
 # Add edge for the DIRECT path
 builder.add_edge("directAnswer", END)
 
-# Compile the graph
+# Compile the graph without checkpointer initially
+# The checkpointer will be set during FastAPI startup via compile_with_checkpointer()
 graph = builder.compile()
+
+
+async def compile_with_checkpointer():
+    """
+    Recompile the graph with PostgresSaver checkpointer.
+
+    This function should be called during FastAPI startup to initialize
+    the checkpointer and recompile the graph with persistence enabled.
+
+    Returns:
+        The compiled graph with checkpointer.
+
+    Example:
+        >>> # In FastAPI startup event
+        >>> @app.on_event("startup")
+        >>> async def startup():
+        >>>     global graph
+        >>>     graph = await compile_with_checkpointer()
+    """
+    from src.shared.checkpointer import get_checkpointer
+
+    checkpointer = await get_checkpointer()
+    return builder.compile(checkpointer=checkpointer)

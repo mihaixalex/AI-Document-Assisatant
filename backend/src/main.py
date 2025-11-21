@@ -38,6 +38,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
+from src.conversations.routes import router as conversations_router
 from src.ingestion_graph import graph as ingestion_graph_module
 from src.retrieval_graph import graph as retrieval_graph_module
 
@@ -102,6 +103,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register conversation management routes
+app.include_router(conversations_router)
 
 
 @app.on_event("startup")

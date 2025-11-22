@@ -108,13 +108,29 @@ async def make_retriever(config: RunnableConfig) -> VectorStoreRetriever:
         ...     "configurable": {
         ...         "retriever_provider": "supabase",
         ...         "k": 10,
-        ...         "filter_kwargs": {"source": "pdf"}
+        ...         "filter_kwargs": {"source": "pdf"},
+        ...         "thread_id": "abc-123"
         ...     }
         ... }
         >>> retriever = await make_retriever(config)
     """
     # Extract and ensure configuration
     configuration = ensure_base_configuration(config)
+
+    # Extract thread_id from config for document isolation
+    configurable = config.get("configurable", {}) if config else {}
+    thread_id = configurable.get("thread_id")
+
+    # Add thread_id filter to configuration if present and valid
+    # Must explicitly check for None and empty string to prevent bypassing isolation
+    if thread_id is not None and thread_id != "":
+        # Create a new configuration with thread_id filter merged
+        updated_filter_kwargs = {**configuration.filter_kwargs, "thread_id": thread_id}
+        configuration = BaseConfiguration(
+            retriever_provider=configuration.retriever_provider,
+            filter_kwargs=updated_filter_kwargs,
+            k=configuration.k
+        )
 
     # Dispatch to appropriate retriever based on provider
     if configuration.retriever_provider == "supabase":

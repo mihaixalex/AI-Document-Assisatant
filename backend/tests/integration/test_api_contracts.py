@@ -52,7 +52,8 @@ class TestIngestionAPIContract:
         # Mock the retriever at the ingestion_graph module level
         with patch("src.ingestion_graph.graph.make_retriever") as mock_make_retriever:
             mock_retriever = AsyncMock()
-            mock_retriever.add_documents = AsyncMock(return_value=None)
+            mock_retriever.vectorstore = MagicMock()
+            mock_retriever.vectorstore.add_documents = MagicMock(return_value=None)
             mock_make_retriever.return_value = mock_retriever
 
             # Prepare input matching frontend API call
@@ -75,8 +76,8 @@ class TestIngestionAPIContract:
             assert result["docs"] == [] or result["docs"] == "delete"
 
             # Verify retriever was called with documents
-            mock_retriever.add_documents.assert_called_once()
-            args = mock_retriever.add_documents.call_args[0][0]
+            mock_retriever.vectorstore.add_documents.assert_called_once()
+            args = mock_retriever.vectorstore.add_documents.call_args[0][0]
             assert len(args) == 2
             assert all(isinstance(doc, Document) for doc in args)
 
@@ -116,7 +117,8 @@ class TestIngestionAPIContract:
         """
         with patch("src.ingestion_graph.graph.make_retriever") as mock_make_retriever:
             mock_retriever = AsyncMock()
-            mock_retriever.add_documents = AsyncMock(return_value=None)
+            mock_retriever.vectorstore = MagicMock()
+            mock_retriever.vectorstore.add_documents = MagicMock(return_value=None)
             mock_make_retriever.return_value = mock_retriever
 
             # Mock file reading
@@ -145,7 +147,7 @@ class TestIngestionAPIContract:
 
                     # Should succeed and clear docs
                     assert "docs" in result
-                    mock_retriever.add_documents.assert_called_once()
+                    mock_retriever.vectorstore.add_documents.assert_called_once()
 
 
 class TestRetrievalAPIContract:
@@ -322,6 +324,7 @@ class TestErrorHandling:
     """Test error handling and status codes match TypeScript behavior."""
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_missing_configuration_error(self) -> None:
         """Test that missing configuration raises appropriate error."""
         input_data = {"docs": [Document(page_content="test")]}

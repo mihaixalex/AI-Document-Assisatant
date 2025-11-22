@@ -59,7 +59,13 @@ class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
 
     message: str = Field(..., min_length=1, description="User message/query")
-    thread_id: str = Field(..., alias="threadId", description="Conversation thread ID")
+    thread_id: str = Field(
+        ...,
+        alias="threadId",
+        min_length=1,
+        max_length=128,
+        description="Conversation thread ID"
+    )
     config: dict | None = Field(
         default=None, description="Optional configuration for the retrieval graph"
     )
@@ -68,7 +74,13 @@ class ChatRequest(BaseModel):
 class IngestRequest(BaseModel):
     """Request model for document ingestion endpoint."""
 
-    thread_id: str = Field(..., alias="threadId", description="Thread ID for ingestion")
+    thread_id: str = Field(
+        ...,
+        alias="threadId",
+        min_length=1,
+        max_length=128,
+        description="Thread ID for ingestion"
+    )
     config: dict | None = Field(
         default=None, description="Optional configuration for the ingestion graph"
     )
@@ -183,7 +195,7 @@ async def health_check() -> HealthResponse:
 @app.post("/api/ingest")
 async def ingest_documents(
     file: UploadFile = File(...),
-    thread_id: str = Form(..., alias="threadId"),
+    thread_id: str = Form(..., alias="threadId", min_length=1, max_length=128),
     config: str = Form(default="{}"),
 ) -> dict:
     """
@@ -232,6 +244,10 @@ async def ingest_documents(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid config JSON")
 
+        # Validate thread_id is not empty
+        if not thread_id or thread_id.strip() == "":
+            raise HTTPException(status_code=400, detail="threadId cannot be empty")
+
         # Use PyPDFLoader for proper PDF parsing
         # Write PDF bytes to temporary file (required by PyPDFLoader)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -242,12 +258,13 @@ async def ingest_documents(
         loader = PyPDFLoader(temp_file_path)
         documents = loader.load()
 
-        # Add UUID to each document's metadata
+        # Add UUID and thread_id to each document's metadata
         for doc in documents:
             if doc.metadata is None:
                 doc.metadata = {}
             doc.metadata["uuid"] = str(uuid.uuid4())
             doc.metadata["source"] = file.filename
+            doc.metadata["thread_id"] = thread_id
 
         # Build RunnableConfig with thread_id
         runnable_config = RunnableConfig(
@@ -455,6 +472,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     Raises:
         HTTPException: If chat processing fails.
     """
+    # Validate thread_id is not empty or whitespace-only
+    if not request.thread_id or request.thread_id.strip() == "":
+        raise HTTPException(status_code=400, detail="threadId cannot be empty")
+
     try:
         return StreamingResponse(
             stream_chat_response(request.message, request.thread_id, request.config),

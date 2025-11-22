@@ -35,7 +35,8 @@ def sample_docs():
 def mock_retriever():
     """Fixture providing a mocked retriever."""
     retriever = AsyncMock()
-    retriever.add_documents = AsyncMock(return_value=None)
+    retriever.vectorstore = MagicMock()
+    retriever.vectorstore.add_documents = MagicMock(return_value=None)
     return retriever
 
 
@@ -72,8 +73,8 @@ class TestIngestDocsNode:
             result = await ingest_docs(state, config)
 
         # Verify retriever was called with the docs
-        mock_retriever.add_documents.assert_called_once()
-        added_docs = mock_retriever.add_documents.call_args[0][0]
+        mock_retriever.vectorstore.add_documents.assert_called_once()
+        added_docs = mock_retriever.vectorstore.add_documents.call_args[0][0]
 
         # Should have 2 documents
         assert len(added_docs) == 2
@@ -100,8 +101,8 @@ class TestIngestDocsNode:
             result = await ingest_docs(state, config)
 
         # Verify retriever was called
-        mock_retriever.add_documents.assert_called_once()
-        added_docs = mock_retriever.add_documents.call_args[0][0]
+        mock_retriever.vectorstore.add_documents.assert_called_once()
+        added_docs = mock_retriever.vectorstore.add_documents.call_args[0][0]
 
         # Should have loaded docs from file
         assert len(added_docs) == 2
@@ -119,7 +120,7 @@ class TestIngestDocsNode:
             result = await ingest_docs(state, None)
 
         # Should succeed with default config
-        mock_retriever.add_documents.assert_called_once()
+        mock_retriever.vectorstore.add_documents.assert_called_once()
         assert result == {"docs": "delete"}
 
     @pytest.mark.asyncio
@@ -147,8 +148,8 @@ class TestIngestDocsNode:
             result = await ingest_docs(state, config)
 
         # Verify that documents were processed
-        mock_retriever.add_documents.assert_called_once()
-        added_docs = mock_retriever.add_documents.call_args[0][0]
+        mock_retriever.vectorstore.add_documents.assert_called_once()
+        added_docs = mock_retriever.vectorstore.add_documents.call_args[0][0]
 
         # Should be converted to Document objects
         assert len(added_docs) > 0
@@ -181,7 +182,7 @@ class TestIngestionGraphStructure:
                 final_state = state
 
         # Verify retriever was called
-        mock_retriever.add_documents.assert_called_once()
+        mock_retriever.vectorstore.add_documents.assert_called_once()
 
         # Final state should have docs cleared (deleted)
         assert final_state is not None
@@ -206,7 +207,7 @@ class TestIngestionGraphStructure:
                 final_state = state
 
         # Verify retriever was called with docs from file
-        mock_retriever.add_documents.assert_called_once()
+        mock_retriever.vectorstore.add_documents.assert_called_once()
         assert final_state is not None
 
 
@@ -220,7 +221,8 @@ class TestIngestionGraphIntegration:
         from src.ingestion_graph.graph import graph
 
         mock_retriever = AsyncMock()
-        mock_retriever.add_documents = AsyncMock(return_value=None)
+        mock_retriever.vectorstore = MagicMock()
+        mock_retriever.vectorstore.add_documents = MagicMock(return_value=None)
 
         initial_state: IndexState = {"docs": sample_docs}
         config = {"configurable": {"retriever_provider": "supabase"}}
@@ -234,7 +236,7 @@ class TestIngestionGraphIntegration:
         assert len(results) > 0
 
         # Verify documents were added to vector store
-        mock_retriever.add_documents.assert_called_once()
-        added_docs = mock_retriever.add_documents.call_args[0][0]
+        mock_retriever.vectorstore.add_documents.assert_called_once()
+        added_docs = mock_retriever.vectorstore.add_documents.call_args[0][0]
         assert len(added_docs) == 2
         assert added_docs[0].page_content == "Introduction to LangChain"

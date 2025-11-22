@@ -152,6 +152,63 @@ class TestIngestEndpoint:
             assert config_arg.get("configurable")["k"] == 10
             assert config_arg.get("configurable")["thread_id"] == "test-thread-123"
 
+    @pytest.mark.asyncio
+    async def test_ingest_rejects_empty_thread_id(self) -> None:
+        """Test that ingestion rejects empty thread_id."""
+        pdf_content = b"%PDF-1.4\nTest PDF"
+        files = {"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")}
+        data = {"threadId": "", "config": "{}"}
+
+        response = client.post("/api/ingest", files=files, data=data)
+
+        # Should return 422 for validation error (Pydantic min_length) or 400
+        assert response.status_code in [400, 422]
+        error_detail = response.json()["detail"]
+        assert "threadId" in str(error_detail) or "empty" in str(error_detail).lower()
+
+    @pytest.mark.asyncio
+    async def test_ingest_rejects_whitespace_only_thread_id(self) -> None:
+        """Test that ingestion rejects whitespace-only thread_id."""
+        pdf_content = b"%PDF-1.4\nTest PDF"
+        files = {"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")}
+        data = {"threadId": "   ", "config": "{}"}
+
+        response = client.post("/api/ingest", files=files, data=data)
+
+        # Should return 400 for validation error
+        assert response.status_code == 400
+        assert "threadId" in response.json()["detail"] or "empty" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_ingest_tags_documents_with_thread_id(self) -> None:
+        """Test that ingested documents are tagged with thread_id metadata."""
+        mock_documents = [
+            Document(page_content="Page 1", metadata={"page": 0}),
+            Document(page_content="Page 2", metadata={"page": 1}),
+        ]
+
+        with patch("src.main.PyPDFLoader") as mock_loader_class, \
+             patch("src.main.ingestion_graph") as mock_graph:
+            mock_loader = MagicMock()
+            mock_loader.load.return_value = mock_documents
+            mock_loader_class.return_value = mock_loader
+            mock_graph.ainvoke = AsyncMock(return_value={"docs": "delete"})
+
+            pdf_content = b"%PDF-1.4\nTest PDF"
+            files = {"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")}
+            data = {"threadId": "test-thread-abc", "config": "{}"}
+
+            response = client.post("/api/ingest", files=files, data=data)
+
+            assert response.status_code == 200
+
+            # Verify documents were tagged with thread_id before ingestion
+            call_args = mock_graph.ainvoke.call_args
+            ingested_docs = call_args[0][0]["docs"]
+            for doc in ingested_docs:
+                assert doc.metadata.get("thread_id") == "test-thread-abc"
+                assert "uuid" in doc.metadata
+
 
 class TestChatEndpoint:
     """Tests for POST /api/chat endpoint."""
@@ -287,6 +344,23 @@ class TestChatEndpoint:
         # Empty message
         response = client.post("/api/chat", json={"message": "", "threadId": "test-123"})
         assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_chat_rejects_empty_thread_id(self) -> None:
+        """Test that chat endpoint rejects empty thread_id."""
+        response = client.post("/api/chat", json={"message": "Hello", "threadId": ""})
+        assert response.status_code == 422
+        error_detail = response.json()["detail"]
+        # Should have validation error for min_length
+        assert any("threadId" in str(err) or "thread_id" in str(err) for err in error_detail)
+
+    @pytest.mark.asyncio
+    async def test_chat_rejects_whitespace_only_thread_id(self) -> None:
+        """Test that chat endpoint rejects whitespace-only thread_id."""
+        response = client.post("/api/chat", json={"message": "Hello", "threadId": "   "})
+        # Should return 400 for validation error
+        assert response.status_code == 400
+        assert "threadId" in response.json()["detail"] or "empty" in response.json()["detail"].lower()
 
 
 class TestSerializationHelpers:

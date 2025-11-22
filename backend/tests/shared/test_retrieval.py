@@ -265,3 +265,138 @@ class TestMakeRetriever:
             assert call_args.filter_kwargs == {"type": "invoice"}
             assert not hasattr(call_args, "other_key")
             assert not hasattr(call_args, "also_ignored")
+
+    @pytest.mark.asyncio
+    async def test_make_retriever_adds_thread_id_filter(self) -> None:
+        """Test that make_retriever adds thread_id to filter_kwargs when present."""
+        config: dict[str, Any] = {
+            "configurable": {
+                "retriever_provider": "supabase",
+                "k": 5,
+                "thread_id": "test-thread-123",
+            }
+        }
+
+        mock_retriever = MagicMock(spec=VectorStoreRetriever)
+
+        with patch(
+            "src.shared.retrieval.make_supabase_retriever", new_callable=AsyncMock
+        ) as mock_make_supabase:
+            mock_make_supabase.return_value = mock_retriever
+
+            await make_retriever(config)
+
+            # Verify thread_id was added to filter_kwargs
+            call_args = mock_make_supabase.call_args[0][0]
+            assert call_args.filter_kwargs == {"thread_id": "test-thread-123"}
+
+    @pytest.mark.asyncio
+    async def test_make_retriever_merges_thread_id_with_existing_filters(self) -> None:
+        """Test that make_retriever merges thread_id with existing filter_kwargs."""
+        config: dict[str, Any] = {
+            "configurable": {
+                "retriever_provider": "supabase",
+                "k": 5,
+                "filter_kwargs": {"source": "pdf", "type": "document"},
+                "thread_id": "test-thread-456",
+            }
+        }
+
+        mock_retriever = MagicMock(spec=VectorStoreRetriever)
+
+        with patch(
+            "src.shared.retrieval.make_supabase_retriever", new_callable=AsyncMock
+        ) as mock_make_supabase:
+            mock_make_supabase.return_value = mock_retriever
+
+            await make_retriever(config)
+
+            # Verify thread_id was merged with existing filters
+            call_args = mock_make_supabase.call_args[0][0]
+            assert call_args.filter_kwargs == {
+                "source": "pdf",
+                "type": "document",
+                "thread_id": "test-thread-456",
+            }
+
+    @pytest.mark.asyncio
+    async def test_make_retriever_without_thread_id(self) -> None:
+        """Test that make_retriever works without thread_id (backwards compatible)."""
+        config: dict[str, Any] = {
+            "configurable": {
+                "retriever_provider": "supabase",
+                "k": 5,
+                "filter_kwargs": {"source": "pdf"},
+            }
+        }
+
+        mock_retriever = MagicMock(spec=VectorStoreRetriever)
+
+        with patch(
+            "src.shared.retrieval.make_supabase_retriever", new_callable=AsyncMock
+        ) as mock_make_supabase:
+            mock_make_supabase.return_value = mock_retriever
+
+            await make_retriever(config)
+
+            # Verify only original filter_kwargs were used
+            call_args = mock_make_supabase.call_args[0][0]
+            assert call_args.filter_kwargs == {"source": "pdf"}
+            assert "thread_id" not in call_args.filter_kwargs
+
+    @pytest.mark.asyncio
+    async def test_make_retriever_with_empty_string_thread_id(self) -> None:
+        """Test that make_retriever does NOT add filter for empty string thread_id."""
+        config: dict[str, Any] = {
+            "configurable": {
+                "retriever_provider": "supabase",
+                "k": 5,
+                "filter_kwargs": {"source": "pdf"},
+                "thread_id": "",  # Empty string should be treated as invalid
+            }
+        }
+
+        mock_retriever = MagicMock(spec=VectorStoreRetriever)
+
+        with patch(
+            "src.shared.retrieval.make_supabase_retriever", new_callable=AsyncMock
+        ) as mock_make_supabase:
+            mock_make_supabase.return_value = mock_retriever
+
+            await make_retriever(config)
+
+            # Verify thread_id was NOT added to filter_kwargs (empty string is invalid)
+            call_args = mock_make_supabase.call_args[0][0]
+            assert call_args.filter_kwargs == {"source": "pdf"}
+            assert "thread_id" not in call_args.filter_kwargs
+
+    @pytest.mark.asyncio
+    async def test_make_retriever_with_whitespace_only_thread_id(self) -> None:
+        """Test that make_retriever DOES add filter for whitespace-only thread_id.
+
+        Note: Whitespace-only strings pass the empty string check but should be
+        rejected by the endpoint validation layer (min_length in Pydantic models).
+        At the retrieval layer, we only check for None and empty string.
+        """
+        config: dict[str, Any] = {
+            "configurable": {
+                "retriever_provider": "supabase",
+                "k": 5,
+                "filter_kwargs": {"source": "pdf"},
+                "thread_id": "   ",  # Whitespace-only
+            }
+        }
+
+        mock_retriever = MagicMock(spec=VectorStoreRetriever)
+
+        with patch(
+            "src.shared.retrieval.make_supabase_retriever", new_callable=AsyncMock
+        ) as mock_make_supabase:
+            mock_make_supabase.return_value = mock_retriever
+
+            await make_retriever(config)
+
+            # Verify whitespace thread_id IS added (it's not None or empty string)
+            # This should be caught at the API validation layer instead
+            call_args = mock_make_supabase.call_args[0][0]
+            assert call_args.filter_kwargs == {"source": "pdf", "thread_id": "   "}

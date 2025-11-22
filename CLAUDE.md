@@ -331,6 +331,79 @@ builder.add_conditional_edges("node", route_fn, ["option1", "option2"])
 graph = builder.compile()
 ```
 
+## Security Patterns
+
+### Document Isolation (GDE-23)
+
+**Implemented**: Thread-based document isolation ensures documents from one conversation cannot be retrieved in another.
+
+#### Validation Requirements
+
+**Both `/api/ingest` and `/api/chat` endpoints MUST validate thread_id:**
+
+```python
+# Defense-in-depth validation (Pydantic + explicit)
+thread_id: str = Field(..., alias="threadId", min_length=1, max_length=128)
+
+# Explicit validation in endpoint handler
+if not thread_id or thread_id.strip() == "":
+    raise HTTPException(status_code=400, detail="threadId cannot be empty")
+```
+
+**Critical**: Always check for both empty strings AND whitespace-only strings to prevent bypass attacks.
+
+#### Document Tagging
+
+All documents MUST be tagged with `thread_id` metadata during ingestion:
+
+```python
+# backend/src/main.py - /api/ingest endpoint
+for doc in documents:
+    doc.metadata["thread_id"] = thread_id  # Required for isolation
+    doc.metadata["uuid"] = str(uuid.uuid4())
+```
+
+#### Retriever Filtering
+
+The `make_retriever()` function automatically filters by `thread_id` from RunnableConfig:
+
+```python
+# backend/src/shared/retrieval.py
+configurable = config.get("configurable", {}) if config else {}
+thread_id = configurable.get("thread_id")
+
+# Only add filter if thread_id is valid (not None or empty)
+if thread_id is not None and thread_id != "":
+    updated_filter_kwargs = {**configuration.filter_kwargs, "thread_id": thread_id}
+```
+
+**Filter**: Supabase uses PostgreSQL's JSONB containment operator (`metadata @> filter`) to enforce isolation.
+
+#### Defense-in-Depth Layers
+
+1. **Pydantic Validation**: `min_length=1, max_length=128` catches null, missing, and empty strings (HTTP 422)
+2. **Explicit Validation**: `.strip() == ""` check catches whitespace-only values (HTTP 400)
+3. **Document Tagging**: Permanent association of documents with conversation
+4. **Retrieval Filtering**: Automatic filter application during vector search
+
+#### Testing Requirements
+
+All document isolation implementations MUST include:
+
+- **Empty string validation tests** (`threadId=""`)
+- **Whitespace-only validation tests** (`threadId="   "`)
+- **Cross-conversation isolation tests** (verify thread A docs not in thread B)
+- **Same-conversation retrieval tests** (verify thread A docs retrievable in thread A)
+
+**Example security tests:**
+```python
+def test_ingest_rejects_empty_thread_id()
+def test_ingest_rejects_whitespace_only_thread_id()
+def test_chat_rejects_empty_thread_id()
+def test_chat_rejects_whitespace_only_thread_id()
+def test_make_retriever_with_empty_string_thread_id()
+```
+
 ## Common Gotchas
 
 1. **State Reducers**: Returning docs appends (use "delete" to clear)
@@ -338,6 +411,7 @@ graph = builder.compile()
 3. **Async/Await**: All nodes must be async
 4. **Configuration**: Use ensure_*_configuration() for typed access
 5. **Backend**: FastAPI is the ONLY backend needed (LangGraph dev server is optional)
+6. **Document Isolation**: NEVER skip thread_id validation - empty/whitespace strings bypass filters
 
 ## Git Commit Policy
 

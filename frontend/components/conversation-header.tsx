@@ -5,16 +5,30 @@ import { useConversation } from '@/contexts/conversation-context';
 import { MobileSidebar } from '@/components/conversation-sidebar';
 import { Plus, Loader2, ChevronDown } from 'lucide-react';
 
-// Grok-style logo component (X eye icon)
-function GrokLogo({ className }: { className?: string }) {
+// NEXUS Logo - Abstract network/nexus symbol
+function NexusLogo({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 24 24"
+      viewBox="0 0 40 40"
       fill="currentColor"
       className={className}
-      aria-label="Logo"
+      aria-label="Nexus Logo"
     >
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+      {/* Three interconnected nodes forming an abstract nexus */}
+      {/* Top node */}
+      <circle cx="20" cy="8" r="3"/>
+      {/* Bottom left node */}
+      <circle cx="8" cy="32" r="3"/>
+      {/* Bottom right node */}
+      <circle cx="32" cy="32" r="3"/>
+
+      {/* Connecting lines (network edges) */}
+      <path d="M20 11 L10 29" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
+      <path d="M20 11 L30 29" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
+      <path d="M11 32 L29 32" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
+
+      {/* Center nexus point */}
+      <circle cx="20" cy="24" r="4"/>
     </svg>
   );
 }
@@ -23,7 +37,7 @@ function GrokLogo({ className }: { className?: string }) {
 export function AIAvatar({ className }: { className?: string }) {
   return (
     <div className={`w-8 h-8 rounded-full bg-white flex items-center justify-center shrink-0 ${className || ''}`}>
-      <GrokLogo className="w-4 h-4 text-black" />
+      <NexusLogo className="w-5 h-5 text-black" />
     </div>
   );
 }
@@ -58,8 +72,8 @@ export function ConversationHeader() {
 
         {/* Logo - visible on all screens */}
         <div className="flex items-center gap-2">
-          <GrokLogo className="h-7 w-6 text-white" />
-          <span className="hidden sm:block font-semibold text-white">AI Assistant</span>
+          <NexusLogo className="h-7 w-7 text-white" />
+          <span className="hidden sm:block font-semibold text-white tracking-wider">NEXUS</span>
         </div>
       </div>
 

@@ -9,8 +9,11 @@ import "./globals.css"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "AI Document Assistant",
+  title: "NEXUS - AI Document Assistant",
   description: "AI-powered document assistant with PDF chat capabilities",
+  icons: {
+    icon: '/icon.svg',
+  },
 }
 
 export default function RootLayout({

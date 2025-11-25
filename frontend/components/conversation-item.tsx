@@ -140,7 +140,7 @@ export function ConversationItem({ conversation }: ConversationItemProps) {
     );
   }
 
-  // Normal mode - Grok style list item
+  // Normal mode - list item
   return (
     <>
       <div

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
-/* Grok UI Dark Theme - Cosmic Minimalism */
+/* NEXUS UI Dark Theme - Cosmic Minimalism */
 @theme {
-  /* Pure black background - Grok default */
+  /* Pure black background - default */
   --color-background: hsl(0 0% 0%);
   --color-foreground: hsl(0 0% 100%);
 
@@ -14,7 +14,7 @@
   --color-popover: hsl(0 0% 12%);
   --color-popover-foreground: hsl(0 0% 100%);
 
-  /* Primary - Grok green accent #00FF9D */
+  /* Primary - green accent #00FF9D */
   --color-primary: hsl(156 100% 50%);
   --color-primary-foreground: hsl(0 0% 0%);
 
@@ -26,7 +26,7 @@
   --color-muted: hsl(0 0% 12%);
   --color-muted-foreground: hsl(0 0% 67%);
 
-  /* Accent - Grok green #00FF9D */
+  /* Accent - green #00FF9D */
   --color-accent: hsl(156 100% 50%);
   --color-accent-foreground: hsl(0 0% 0%);
 
@@ -41,17 +41,17 @@
 
   --radius: 0.5rem;
 
-  /* Grok-specific custom colors */
-  --grok-black: #000000;
-  --grok-surface: #1F1F1F;
-  --grok-hover: #2F2F2F;
-  --grok-border: #1F1F1F;
-  --grok-green: #00FF9D;
-  --grok-text-primary: #FFFFFF;
-  --grok-text-secondary: #AAAAAA;
-  --grok-text-muted: #666666;
-  --grok-code-bg: #0D0D0D;
-  --grok-code-border: #333333;
+  /* NEXUS theme custom colors */
+  --nexus-black: #000000;
+  --nexus-surface: #1F1F1F;
+  --nexus-hover: #2F2F2F;
+  --nexus-border: #1F1F1F;
+  --nexus-green: #00FF9D;
+  --nexus-text-primary: #FFFFFF;
+  --nexus-text-secondary: #AAAAAA;
+  --nexus-text-muted: #666666;
+  --nexus-code-bg: #0D0D0D;
+  --nexus-code-border: #333333;
 }
 
 /* Force dark mode - no light theme support per spec */
@@ -86,13 +86,13 @@ html {
 }
 
 body {
-  background-color: var(--grok-black);
-  color: var(--grok-text-primary);
+  background-color: var(--nexus-black);
+  color: var(--nexus-text-primary);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
 }
 
-/* Grok message bubble animations */
+/* Message bubble animations */
 @keyframes message-fade-in {
   from {
     opacity: 0;
@@ -141,31 +141,31 @@ body {
 
 .animate-skeleton {
   animation: skeleton-pulse 1.5s ease-in-out infinite;
-  background-color: var(--grok-surface);
+  background-color: var(--nexus-surface);
 }
 
-/* Focus ring with Grok green */
-.focus-grok:focus-visible {
+/* Focus ring with accent green */
+.focus-nexus:focus-visible {
   outline: none;
   ring: 2px;
-  ring-color: var(--grok-green);
+  ring-color: var(--nexus-green);
 }
 
-/* Scrollbar styling for Grok theme */
+/* Scrollbar styling for dark theme */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--grok-black);
+  background: var(--nexus-black);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--grok-surface);
+  background: var(--nexus-surface);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--grok-hover);
+  background: var(--nexus-hover);
 }

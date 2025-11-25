@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- NEXUS Favicon - Abstract network/nexus symbol -->
+  <rect width="32" height="32" fill="#000000"/>
+  <g fill="#FFFFFF">
+    <!-- Top node -->
+    <circle cx="16" cy="6" r="2.5"/>
+    <!-- Bottom left node -->
+    <circle cx="6" cy="26" r="2.5"/>
+    <!-- Bottom right node -->
+    <circle cx="26" cy="26" r="2.5"/>
+    <!-- Center nexus point -->
+    <circle cx="16" cy="19" r="3"/>
+  </g>
+  <!-- Connecting lines -->
+  <path d="M16 8.5 L8 23.5" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M16 8.5 L24 23.5" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M8.5 26 L23.5 26" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

@@ -15,8 +15,9 @@
     <path d="M20 11 L30 29" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     <path d="M11 32 L29 32" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
 
-    <!-- Center nexus point -->
-    <circle cx="20" cy="24" r="4"/>
+    <!-- Center nexus point with glow effect -->
+    <circle cx="20" cy="24" r="4" fill="currentColor"/>
+    <circle cx="20" cy="24" r="2" fill="currentColor" opacity="0.5"/>
   </g>
 
   <!-- Wordmark: NEXUS -->

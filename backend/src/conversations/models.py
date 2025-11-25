@@ -48,6 +48,31 @@ class ConversationResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
 
+class DeletedConversationResponse(BaseModel):
+    """Response model for deleted conversation with expiration info."""
+
+    id: UUID = Field(..., description="Internal database ID")
+    thread_id: str = Field(..., alias="threadId", description="LangGraph thread identifier")
+    title: str | None = Field(default=None, description="Conversation title")
+    created_at: datetime = Field(..., alias="createdAt", description="Creation timestamp")
+    updated_at: datetime = Field(..., alias="updatedAt", description="Last update timestamp")
+    user_id: str | None = Field(default=None, alias="userId", description="User identifier")
+    is_deleted: bool = Field(..., alias="isDeleted", description="Soft delete flag")
+    deleted_at: datetime | None = Field(default=None, alias="deletedAt", description="Deletion timestamp")
+    expires_at: datetime | None = Field(default=None, alias="expiresAt", description="Permanent deletion time")
+
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class DeletedConversationListResponse(BaseModel):
+    """Response model for deleted conversations list with pagination."""
+
+    conversations: list[DeletedConversationResponse] = Field(..., description="List of deleted conversations")
+    total: int = Field(..., description="Total count of deleted conversations")
+    limit: int = Field(..., description="Page size limit")
+    offset: int = Field(..., description="Pagination offset")
+
+
 class ConversationListResponse(BaseModel):
     """Response model for list endpoint with pagination metadata."""
 

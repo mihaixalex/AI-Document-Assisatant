@@ -20,6 +20,8 @@ from src.conversations.models import (
     ConversationListResponse,
     ConversationResponse,
     ConversationUpdate,
+    DeletedConversationListResponse,
+    DeletedConversationResponse,
     DeleteResponse,
 )
 from src.conversations.repository import ConversationRepository, get_repository
@@ -217,6 +219,74 @@ async def update_conversation(
         logger.error("Failed to update conversation: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to update conversation: {str(e)}"
+        ) from e
+
+
+@router.get("/deleted", response_model=DeletedConversationListResponse)
+async def list_deleted_conversations(
+    limit: Annotated[int, Query(ge=1, le=100, description="Page size limit")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+    repository: ConversationRepository = Depends(get_repository),
+) -> DeletedConversationListResponse:
+    """List all soft-deleted conversations within retention period.
+
+    Returns conversations that have been deleted but not yet permanently removed.
+    Conversations expire 30 days after deletion.
+
+    Args:
+        limit: Maximum number of conversations to return (1-100, default 50)
+        offset: Number of conversations to skip (default 0)
+        repository: Injected conversation repository
+
+    Returns:
+        DeletedConversationListResponse with deleted conversations and pagination
+    """
+    try:
+        conversations, total = await repository.list_deleted_conversations(limit=limit, offset=offset)
+
+        conversation_models = [DeletedConversationResponse(**conv) for conv in conversations]
+
+        return DeletedConversationListResponse(
+            conversations=conversation_models, total=total, limit=limit, offset=offset
+        )
+    except Exception as e:
+        logger.error("Failed to list deleted conversations: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to list deleted conversations: {str(e)}"
+        ) from e
+
+
+@router.post("/{thread_id}/restore", response_model=ConversationResponse)
+async def restore_conversation(
+    thread_id: Annotated[str, Path(min_length=1, max_length=100)],
+    repository: ConversationRepository = Depends(get_repository),
+) -> ConversationResponse:
+    """Restore a soft-deleted conversation.
+
+    Args:
+        thread_id: LangGraph thread identifier
+        repository: Injected conversation repository
+
+    Returns:
+        ConversationResponse with restored conversation details
+
+    Raises:
+        HTTPException: 404 if conversation not found or not deleted
+    """
+    try:
+        conversation = await repository.restore_conversation(thread_id)
+        if not conversation:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Conversation {thread_id} not found or not deleted",
+            )
+        return ConversationResponse(**conversation)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to restore conversation: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to restore conversation: {str(e)}"
         ) from e
 
 

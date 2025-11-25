@@ -1,7 +1,6 @@
 // app/api/ingest/route.ts
 import { indexConfig } from '@/constants/graphConfigs';
 import { NextRequest, NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
 import http from 'http';
 import https from 'https';
 
@@ -26,6 +25,19 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const files: File[] = [];
+
+    // Get threadId from formData
+    const threadId = formData.get('threadId') as string;
+    if (!threadId || threadId.trim() === '') {
+      return NextResponse.json(
+        { error: 'Thread ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Get isShared flag (defaults to false) - strict boolean validation
+    const isSharedStr = formData.get('isShared');
+    const isShared = isSharedStr !== null && isSharedStr === 'true';
 
     for (const [key, value] of formData.entries()) {
       // Check if it's a File by checking for File-like properties
@@ -70,9 +82,6 @@ export async function POST(request: NextRequest) {
     const results = [];
     for (const file of files) {
       try {
-        // Generate thread ID for this ingestion
-        const threadId = uuidv4();
-
         // Create FormData for FastAPI request
         const fastapiFormData = new FormData();
         fastapiFormData.append('file', file);
@@ -80,6 +89,8 @@ export async function POST(request: NextRequest) {
         fastapiFormData.append('config', JSON.stringify({
           configurable: {
             ...indexConfig,
+            thread_id: threadId,
+            is_shared: isShared, // Pass shared KB flag to backend
           },
         }));
 
@@ -104,7 +115,7 @@ export async function POST(request: NextRequest) {
           results.push({
             file: file.name,
             status: 'success',
-            threadId: resultData.thread_id,
+            threadId: resultData.threadId,
           });
         }
       } catch (error: any) {

@@ -30,9 +30,9 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!threadId) {
+    if (!threadId || threadId.trim() === '') {
       return new NextResponse(
-        JSON.stringify({ error: 'Thread ID is required' }),
+        JSON.stringify({ error: 'Thread ID cannot be empty or whitespace' }),
         {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
@@ -56,6 +56,7 @@ export async function POST(req: Request) {
           config: {
             configurable: {
               ...retrievalAssistantStreamConfig,
+              thread_id: threadId,
             },
           },
         }),

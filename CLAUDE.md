@@ -5,6 +5,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Always use context7**: when I need code generation, setup or configuration steps, or
+library/API documentation. This means you should automatically use the Context7 MCP
+tools to resolve library id and get library docs without me having to explicitly ask.
+
 ## Development Commands
 
 ### Backend (Python + Poetry)
@@ -333,7 +337,7 @@ graph = builder.compile()
 
 ## Security Patterns
 
-### Document Isolation (GDE-23)
+### Document Isolation 
 
 **Implemented**: Thread-based document isolation ensures documents from one conversation cannot be retrieved in another.
 

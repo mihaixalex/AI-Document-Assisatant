@@ -32,8 +32,9 @@ from typing import Any, AsyncGenerator
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
+from unstructured.chunking.title import chunk_by_title
+from unstructured.partition.pdf import partition_pdf
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
@@ -249,15 +250,48 @@ async def ingest_documents(
         if not thread_id or thread_id.strip() == "":
             raise HTTPException(status_code=400, detail="threadId cannot be empty")
 
-        # Use PyPDFLoader for proper PDF parsing
-        # Write PDF bytes to temporary file (required by PyPDFLoader)
+        # Use Unstructured for robust PDF parsing (tables, charts, OCR, etc.)
+        # Write PDF bytes to temporary file (required by partition_pdf)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             tmp_file.write(content)
             temp_file_path = tmp_file.name
 
-        # Load PDF using PyPDFLoader
-        loader = PyPDFLoader(temp_file_path)
-        documents = loader.load()
+        # Parse PDF using Unstructured with hi_res strategy for best results
+        # hi_res enables table detection, OCR for scanned docs, and better layout analysis
+        elements = partition_pdf(
+            filename=temp_file_path,
+            strategy="hi_res",
+            infer_table_structure=True,  # Extract tables as structured data
+            extract_images_in_pdf=False,  # Disable image extraction for now
+        )
+
+        # Apply semantic chunking - groups content by document structure (titles, sections)
+        # This creates more meaningful chunks than arbitrary page splits
+        chunks = chunk_by_title(
+            elements,
+            max_characters=1500,  # Target chunk size
+            new_after_n_chars=1000,  # Start new chunk after this many chars
+            combine_text_under_n_chars=200,  # Combine small text blocks
+        )
+
+        # Convert Unstructured elements to LangChain Documents
+        documents = []
+        for i, chunk in enumerate(chunks):
+            # Get element metadata
+            element_metadata = chunk.metadata.to_dict() if hasattr(chunk.metadata, 'to_dict') else {}
+
+            # Create Document with element text and metadata
+            doc = Document(
+                page_content=str(chunk),
+                metadata={
+                    "source": file.filename,
+                    "chunk_index": i,
+                    "element_type": type(chunk).__name__,
+                    "page_number": element_metadata.get("page_number"),
+                    **{k: v for k, v in element_metadata.items() if k not in ["filename", "file_directory"]},
+                }
+            )
+            documents.append(doc)
 
         # Extract is_shared flag from config (defaults to False) - strict boolean validation
         is_shared_value = config_dict.get("configurable", {}).get("is_shared", False)
@@ -305,9 +339,9 @@ async def ingest_documents(
 
         return {
             "status": "success",
-            "message": f"Successfully ingested {file.filename} ({len(documents)} pages)",
+            "message": f"Successfully ingested {file.filename} ({len(documents)} chunks)",
             "thread_id": thread_id,
-            "pages": len(documents),
+            "chunks": len(documents),
         }
 
     except HTTPException:

@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "python-multipart>=0.0.17",
     "pypdf (>=6.2.0,<7.0.0)",
+    "unstructured[pdf]>=0.16.0",
     "alembic>=1.13.0",
     "psycopg[binary] (>=3.2.12,<4.0.0)",
 ]

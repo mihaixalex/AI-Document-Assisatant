@@ -4,26 +4,15 @@ import type React from 'react';
 
 import { useToast } from '@/hooks/use-toast';
 import { useRef, useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import { Paperclip, ArrowUp, Loader2 } from 'lucide-react';
-import { ExamplePrompts } from '@/components/example-prompts';
 import { ChatMessage } from '@/components/chat-message';
 import { FilePreview } from '@/components/file-preview';
 import {
-  AgentState,
-  documentType,
   PDFDocument,
 } from '@/types/graphTypes';
-import Particles from '@/components/particles';
-import { ThemeToggle } from '@/components/theme-toggle';
-import { useTheme } from 'next-themes';
 import { useConversation } from '@/contexts/conversation-context';
 import { ConversationSidebar } from '@/components/conversation-sidebar';
 import { ConversationHeader } from '@/components/conversation-header';
-import { SidebarInset } from '@/components/ui/sidebar';
 
 // Type definitions for backend messages
 interface BackendMessage {
@@ -45,8 +34,6 @@ interface NodeUpdate {
 }
 
 export default function Home() {
-  const { resolvedTheme } = useTheme();
-  const isDarkMode = resolvedTheme === 'dark';
   const { toast } = useToast();
   const { currentThreadId } = useConversation();
 
@@ -61,11 +48,12 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadToShared, setUploadToShared] = useState(false); // Shared knowledge base toggle
+  const [uploadToShared, setUploadToShared] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastRetrievedDocsRef = useRef<PDFDocument[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load conversation history when currentThreadId changes
   useEffect(() => {
@@ -79,7 +67,6 @@ export default function Home() {
         }
         const data = await response.json();
 
-        // Transform backend messages to frontend format
         if (data.messages && Array.isArray(data.messages)) {
           const formattedMessages = data.messages.map((msg: BackendMessage) => ({
             role: msg.type === 'human' ? ('user' as const) : ('assistant' as const),
@@ -88,12 +75,10 @@ export default function Home() {
           }));
           setMessages(formattedMessages);
         } else {
-          // No history, start fresh
           setMessages([]);
         }
       } catch (error) {
         console.error('Error loading conversation history:', error);
-        // Start with empty messages on error
         setMessages([]);
       }
     };
@@ -104,6 +89,14 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 192)}px`;
+    }
+  }, [input]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,8 +109,8 @@ export default function Home() {
     const userMessage = input.trim();
     setMessages((prev) => [
       ...prev,
-      { role: 'user', content: userMessage, sources: undefined }, // Clear sources for new user message
-      { role: 'assistant', content: '', sources: undefined }, // Clear sources for new assistant message
+      { role: 'user', content: userMessage, sources: undefined },
+      { role: 'assistant', content: '', sources: undefined },
     ]);
     setInput('');
     setIsLoading(true);
@@ -125,7 +118,7 @@ export default function Home() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    lastRetrievedDocsRef.current = []; // Clear the last retrieved documents
+    lastRetrievedDocsRef.current = [];
 
     try {
       const response = await fetch('/api/chat', {
@@ -148,23 +141,29 @@ export default function Home() {
       if (!reader) throw new Error('No reader available');
 
       const decoder = new TextDecoder();
+      let buffer = ''; // Buffer for incomplete SSE lines
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunkStr = decoder.decode(value);
-        const lines = chunkStr.split('\n').filter(Boolean);
+        // Append new data to buffer and process complete lines
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+
+        // Keep the last incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
+          const trimmedLine = line.trim();
+          if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
 
-          const sseString = line.slice('data: '.length);
+          const sseString = trimmedLine.slice('data: '.length);
           let sseEvent: SSEEvent;
           try {
             sseEvent = JSON.parse(sseString) as SSEEvent;
           } catch (err) {
-            console.error('Error parsing SSE line:', err, line);
+            console.error('Error parsing SSE line:', err, trimmedLine);
             continue;
           }
 
@@ -176,7 +175,6 @@ export default function Home() {
               if (lastObj?.type === 'ai') {
                 const partialContent = lastObj.content ?? '';
 
-                // Only display if content is a string message
                 if (
                   typeof partialContent === 'string' &&
                   !partialContent.startsWith('{')
@@ -187,9 +185,12 @@ export default function Home() {
                       newArr.length > 0 &&
                       newArr[newArr.length - 1].role === 'assistant'
                     ) {
-                      newArr[newArr.length - 1].content = partialContent;
-                      newArr[newArr.length - 1].sources =
-                        lastRetrievedDocsRef.current;
+                      // Create new object to ensure React detects the change
+                      newArr[newArr.length - 1] = {
+                        ...newArr[newArr.length - 1],
+                        content: partialContent,
+                        sources: lastRetrievedDocsRef.current,
+                      };
                     }
 
                     return newArr;
@@ -198,27 +199,24 @@ export default function Home() {
               }
             }
           } else if (event === 'updates' && data) {
-            // Extract the updates object (backend sends data.updates.nodeName)
-            const dataObj = data as { updates?: NodeUpdate } | NodeUpdate;
-            const updates = ('updates' in dataObj ? dataObj.updates : dataObj) as NodeUpdate;
+            const updates = data as NodeUpdate;
 
-            // Handle document retrieval updates
+            // Handle document retrieval
             if (
               updates?.retrieveDocuments?.documents &&
               Array.isArray(updates.retrieveDocuments.documents)
             ) {
-              const retrievedDocs = updates.retrieveDocuments.documents as PDFDocument[];
-              lastRetrievedDocsRef.current = retrievedDocs;
-              console.log('Retrieved documents:', retrievedDocs);
+              lastRetrievedDocsRef.current = updates.retrieveDocuments.documents as PDFDocument[];
             }
 
-            // Handle directAnswer node - extract AI message
+            // Handle direct answer
             if (
               updates?.directAnswer?.messages &&
               Array.isArray(updates.directAnswer.messages)
             ) {
-              const messages = updates.directAnswer.messages;
-              const aiMessage = messages.find((msg: BackendMessage) => msg.type === 'ai');
+              const aiMessage = updates.directAnswer.messages.find(
+                (msg: BackendMessage) => msg.type === 'ai'
+              );
 
               if (aiMessage && typeof aiMessage.content === 'string') {
                 setMessages((prev) => {
@@ -227,22 +225,26 @@ export default function Home() {
                     newArr.length > 0 &&
                     newArr[newArr.length - 1].role === 'assistant'
                   ) {
-                    newArr[newArr.length - 1].content = aiMessage.content;
-                    newArr[newArr.length - 1].sources =
-                      lastRetrievedDocsRef.current;
+                    // Create new object to ensure React detects the change
+                    newArr[newArr.length - 1] = {
+                      ...newArr[newArr.length - 1],
+                      content: aiMessage.content,
+                      sources: lastRetrievedDocsRef.current,
+                    };
                   }
                   return newArr;
                 });
               }
             }
 
-            // Handle generateResponse node - extract AI message
+            // Handle generate response
             if (
               updates?.generateResponse?.messages &&
               Array.isArray(updates.generateResponse.messages)
             ) {
-              const messages = updates.generateResponse.messages;
-              const aiMessage = messages.find((msg: BackendMessage) => msg.type === 'ai');
+              const aiMessage = updates.generateResponse.messages.find(
+                (msg: BackendMessage) => msg.type === 'ai'
+              );
 
               if (aiMessage && typeof aiMessage.content === 'string') {
                 setMessages((prev) => {
@@ -251,16 +253,19 @@ export default function Home() {
                     newArr.length > 0 &&
                     newArr[newArr.length - 1].role === 'assistant'
                   ) {
-                    newArr[newArr.length - 1].content = aiMessage.content;
-                    newArr[newArr.length - 1].sources =
-                      lastRetrievedDocsRef.current;
+                    // Create new object to ensure React detects the change
+                    newArr[newArr.length - 1] = {
+                      ...newArr[newArr.length - 1],
+                      content: aiMessage.content,
+                      sources: lastRetrievedDocsRef.current,
+                    };
                   }
                   return newArr;
                 });
               }
             }
-          } else {
-            console.log('Unknown SSE event:', event, data);
+          } else if (event === 'error') {
+            console.error('SSE error event:', data);
           }
         }
       }
@@ -275,8 +280,13 @@ export default function Home() {
       });
       setMessages((prev) => {
         const newArr = [...prev];
-        newArr[newArr.length - 1].content =
-          'Sorry, there was an error processing your message.';
+        if (newArr.length > 0 && newArr[newArr.length - 1].role === 'assistant') {
+          // Create new object to ensure React detects the change
+          newArr[newArr.length - 1] = {
+            ...newArr[newArr.length - 1],
+            content: 'Sorry, there was an error processing your message.',
+          };
+        }
         return newArr;
       });
     } finally {
@@ -317,7 +327,7 @@ export default function Home() {
         formData.append('files', file);
       });
       formData.append('threadId', currentThreadId);
-      formData.append('isShared', uploadToShared.toString()); // Pass shared KB flag
+      formData.append('isShared', uploadToShared.toString());
 
       const response = await fetch('/api/ingest', {
         method: 'POST',
@@ -361,152 +371,136 @@ export default function Home() {
     });
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as unknown as React.FormEvent);
+    }
+  };
+
   return (
     <>
+      {/* Desktop Sidebar */}
       <ConversationSidebar />
-      <SidebarInset>
-        {/* Particles background - only visible in dark mode */}
-        {isDarkMode && (
-          <div className="fixed inset-0 pointer-events-none z-0">
-            <Particles
-              particleCount={150}
-              particleSpread={15}
-              speed={0.05}
-              particleColors={['#ffffff', '#ffffff', '#ffffff']}
-              alphaParticles={true}
-              particleBaseSize={200}
-              sizeRandomness={2}
-            />
-          </div>
-        )}
 
-        {/* Theme toggle button */}
-        <ThemeToggle />
-
-        {/* Header with conversation title and mobile menu */}
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col bg-black min-w-0">
+        {/* Header */}
         <ConversationHeader />
 
-        <main className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center p-4 md:p-24 max-w-5xl mx-auto w-full relative z-10">
-          {messages.length === 0 ? (
-          <>
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <p className="font-medium text-muted-foreground max-w-md mx-auto text-2xl">
-                  Coffee and Jarvis time? ☕
-                </p>
+        {/* Chat Area */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-4xl mx-auto w-full px-4 py-4">
+            {messages.length === 0 ? (
+              /* Empty State */
+              <div className="flex flex-col items-center justify-center h-[calc(100vh-12rem)] text-[#AAAAAA]">
+                <h1 className="text-2xl font-semibold mb-2 text-white">What do you want to know?</h1>
+                <p className="text-sm">Ask me anything about your documents.</p>
               </div>
-            </div>
-            <ExamplePrompts onPromptSelect={setInput} />
-          </>
-        ) : (
-          <div className="w-full space-y-4 mb-20">
-            {messages.map((message, i) => (
-              <ChatMessage key={i} message={message} />
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-background md:left-[var(--sidebar-width)]">
-          <div className="max-w-5xl mx-auto space-y-4">
-          {files.length > 0 && (
-            <div className="grid grid-cols-3 gap-2">
-              {files.map((file, index) => (
-                <FilePreview
-                  key={`${file.name}-${index}`}
-                  file={file}
-                  onRemove={() => handleRemoveFile(file)}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Shared knowledge base toggle */}
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="shared-kb"
-              checked={uploadToShared}
-              onCheckedChange={(checked) => setUploadToShared(checked === true)}
-            />
-            <Label htmlFor="shared-kb" className="text-sm text-muted-foreground cursor-pointer">
-              Add to shared knowledge base (accessible in all conversations)
-            </Label>
-          </div>
-
-          <form onSubmit={handleSubmit} className="relative">
-            <div
-              className="flex gap-2 border rounded-md overflow-hidden shadow-sm transition-colors"
-              style={{
-                backgroundColor: isDarkMode ? '#111827' : '#ffffff',
-                borderColor: isDarkMode ? '#1f2937' : '#e5e7eb',
-              }}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept=".pdf"
-                multiple
-                className="hidden"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="rounded-none h-12"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: isDarkMode ? '#f9fafb' : '#111827',
-                }}
-              >
-                {isUploading ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-foreground" />
-                  </div>
-                ) : (
-                  <Paperclip className="h-4 w-4 text-foreground" />
-                )}
-              </Button>
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={
-                  isUploading ? 'Uploading PDF...' : 'Send a message...'
-                }
-                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-12 bg-transparent"
-                disabled={isUploading || isLoading || !currentThreadId}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: isDarkMode ? '#f9fafb' : '#111827',
-                }}
-              />
-              <Button
-                type="submit"
-                variant="ghost"
-                size="icon"
-                className="rounded-none h-12"
-                disabled={
-                  !input.trim() || isUploading || isLoading || !currentThreadId
-                }
-                style={{
-                  backgroundColor: 'transparent',
-                  color: isDarkMode ? '#f9fafb' : '#111827',
-                }}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          </form>
+            ) : (
+              /* Messages */
+              <div className="flex flex-col space-y-4 pb-32">
+                {messages.map((message, i) => (
+                  <ChatMessage key={i} message={message} />
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Input Bar (Footer) */}
+        <footer className="border-t border-[#1F1F1F] p-4 bg-black">
+          <div className="max-w-4xl mx-auto">
+            {/* File Previews */}
+            {files.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {files.map((file, index) => (
+                  <FilePreview
+                    key={`${file.name}-${index}`}
+                    file={file}
+                    onRemove={() => handleRemoveFile(file)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Shared KB Toggle */}
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                type="checkbox"
+                id="shared-kb"
+                checked={uploadToShared}
+                onChange={(e) => setUploadToShared(e.target.checked)}
+                className="w-4 h-4 rounded bg-[#1F1F1F] border-[#333333] text-[#00FF9D] focus:ring-[#00FF9D] focus:ring-offset-0 cursor-pointer"
+              />
+              <label htmlFor="shared-kb" className="text-sm text-[#AAAAAA] cursor-pointer">
+                Add to shared knowledge base
+              </label>
+            </div>
+
+            {/* Input Form */}
+            <form onSubmit={handleSubmit}>
+              <div className="flex items-end gap-2">
+                {/* Upload Button */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  accept=".pdf"
+                  multiple
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="w-10 h-10 flex items-center justify-center text-[#AAAAAA] hover:text-[#00FF9D] transition-colors disabled:opacity-50 shrink-0"
+                  aria-label="Upload file"
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-5 w-5" />
+                  )}
+                </button>
+
+                {/* Textarea */}
+                <div className="flex-1 relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={isUploading ? 'Uploading PDF...' : 'Send a message...'}
+                    disabled={isUploading || isLoading || !currentThreadId}
+                    className="w-full bg-[#1F1F1F] border border-[#333333] rounded-2xl p-4 pr-12 text-white placeholder-[#666666] resize-none focus:outline-none focus:border-[#00FF9D] transition-colors disabled:opacity-50 max-h-48"
+                    rows={1}
+                  />
+                </div>
+
+                {/* Send Button */}
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isUploading || isLoading || !currentThreadId}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                    input.trim() && !isLoading
+                      ? 'bg-[#00FF9D] text-black hover:bg-[#00E08A]'
+                      : 'bg-[#333333] text-[#666666]'
+                  } disabled:cursor-not-allowed`}
+                  aria-label="Send message"
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </footer>
       </main>
-      </SidebarInset>
     </>
   );
 }

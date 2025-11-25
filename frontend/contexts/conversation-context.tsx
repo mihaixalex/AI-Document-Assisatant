@@ -20,6 +20,7 @@ interface ConversationContextType {
   createConversation: (title?: string) => Promise<Conversation>;
   loadConversation: (threadId: string) => Promise<void>;
   deleteConversation: (threadId: string) => Promise<void>;
+  updateConversation: (threadId: string, title: string) => Promise<Conversation>;
   refreshConversations: () => Promise<void>;
   setCurrentThreadId: (threadId: string | null) => void;
 }
@@ -199,6 +200,44 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     }
   }, [toast, createConversation]);
 
+  // Update a conversation's title
+  const updateConversation = useCallback(async (threadId: string, title: string): Promise<Conversation> => {
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update conversation');
+      }
+
+      const updatedConversation = await response.json();
+
+      // Update in conversations list
+      setConversations((prev) =>
+        prev.map((c) => (c.threadId === threadId ? { ...c, title: updatedConversation.title, updatedAt: updatedConversation.updatedAt } : c))
+      );
+
+      toast({
+        title: 'Conversation renamed',
+        description: 'The conversation title has been updated.',
+      });
+
+      return updatedConversation;
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to update conversation',
+        variant: 'destructive',
+      });
+      throw err;
+    }
+  }, [toast]);
+
   // Use ref to prevent multiple initialization runs
   const hasInitializedRef = useRef(false);
 
@@ -298,6 +337,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     createConversation,
     loadConversation,
     deleteConversation,
+    updateConversation,
     refreshConversations,
     setCurrentThreadId,
   };

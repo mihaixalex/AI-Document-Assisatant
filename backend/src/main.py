@@ -337,22 +337,33 @@ async def stream_chat_response(
             }
         )
 
-        # Stream from retrieval graph
+        logger.info(f"Starting stream for thread {thread_id} with message: {message[:50]}...")
+
+        # Stream from retrieval graph - use only 'updates' mode for reliability
+        # The 'updates' mode yields state updates after each node completes
         async for chunk in retrieval_graph.astream(
             {"query": message, "messages": [], "route": "", "documents": []},  # type: ignore[arg-type]
             config=runnable_config,
-            stream_mode=["messages", "updates"],
+            stream_mode="updates",
         ):
-            # Format chunk as SSE event
-            event_data = format_stream_chunk(chunk)  # type: ignore[arg-type]
-            if event_data:
-                yield f"data: {json.dumps(event_data)}\n\n"
+            # With stream_mode="updates", chunk is a dict: {node_name: state_update}
+            if isinstance(chunk, dict):
+                for node_name, state_data in chunk.items():
+                    event_data = {
+                        "event": "updates",
+                        "data": {node_name: serialize_state_data(state_data) if isinstance(state_data, dict) else state_data},
+                    }
+                    yield f"data: {json.dumps(event_data)}\n\n"
+
+        # Send completion event
+        logger.info(f"Stream completed for thread {thread_id}")
+        yield f"data: {json.dumps({'event': 'done', 'data': {}})}\n\n"
 
     except Exception as e:
         # Log the full error with stack trace
         logger.error(f"Stream error for thread {thread_id}: {str(e)}", exc_info=True)
         # Use "event" key to match LangGraph SDK format
-        error_event = {"event": "error", "data": {"message": "Chat processing failed"}}
+        error_event = {"event": "error", "data": {"message": str(e)}}
         yield f"data: {json.dumps(error_event)}\n\n"
 
 
@@ -360,27 +371,61 @@ def format_stream_chunk(chunk: tuple) -> dict | None:
     """
     Format a LangGraph stream chunk for SSE transmission in LangGraph SDK format.
 
-    Converts LangGraph stream chunks (which are tuples of node name and data)
-    into the format expected by the frontend (matching LangGraph SDK format).
+    Converts LangGraph stream chunks into the format expected by the frontend.
+
+    When using multiple stream_mode (e.g., ["messages", "updates"]), chunks are
+    nested tuples: (stream_mode, (node_name, data))
+
+    When using single stream_mode, chunks are: (node_name, data)
 
     Frontend expects:
     - For message chunks: {"event": "messages/partial", "data": [{"type": "ai", "content": "..."}]}
     - For state updates: {"event": "updates", "data": {"nodeName": {...}}}
 
     Args:
-        chunk: LangGraph stream chunk (node_name, data) tuple.
+        chunk: LangGraph stream chunk - either (stream_mode, (node_name, data))
+               or (node_name, data) tuple.
 
     Returns:
         dict: Formatted chunk data or None if not serializable.
     """
     try:
-        # chunk is typically a tuple: (node_name, data)
-        if isinstance(chunk, tuple) and len(chunk) == 2:
-            node_name, data = chunk
+        if not isinstance(chunk, tuple) or len(chunk) != 2:
+            return None
 
-            # Handle different data types
+        first, second = chunk
+
+        # Check if this is a nested tuple from multiple stream modes
+        # Pattern: (stream_mode_str, (node_name, data))
+        if isinstance(first, str) and isinstance(second, tuple) and len(second) == 2:
+            stream_mode = first
+            node_name, data = second
+
+            if stream_mode == "messages":
+                # Message stream mode - data is a BaseMessage
+                if isinstance(data, BaseMessage):
+                    return {
+                        "event": "messages/partial",
+                        "data": [
+                            {
+                                "type": data.type,
+                                "content": data.content,
+                                "id": getattr(data, "id", None),
+                            }
+                        ],
+                    }
+            elif stream_mode == "updates":
+                # Updates stream mode - data is a state dict
+                if isinstance(data, dict):
+                    return {
+                        "event": "updates",
+                        "data": {node_name: serialize_state_data(data)},
+                    }
+        else:
+            # Fallback for single stream_mode: (node_name, data)
+            node_name, data = first, second
+
             if isinstance(data, BaseMessage):
-                # For message chunks - format as messages/partial event with array
                 return {
                     "event": "messages/partial",
                     "data": [
@@ -392,7 +437,6 @@ def format_stream_chunk(chunk: tuple) -> dict | None:
                     ],
                 }
             elif isinstance(data, dict):
-                # For state updates - format as updates event with nested data by node name
                 return {
                     "event": "updates",
                     "data": {node_name: serialize_state_data(data)},

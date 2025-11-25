@@ -32,9 +32,12 @@ class AgentState(TypedDict):
               Determines if document retrieval is needed.
         documents: List of documents retrieved from vector store.
                   Uses reduce_docs reducer for concatenation and deduplication.
+        force_refusal: Flag to force refusal when no relevant documents found.
+                      Prevents hallucination by refusing to answer without context.
     """
 
     messages: Annotated[Sequence[BaseMessage], add_messages]
     query: str
     route: str
     documents: Annotated[list[Document], reduce_docs]
+    force_refusal: bool

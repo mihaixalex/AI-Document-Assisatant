@@ -38,6 +38,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
+from src.conversations.repository import get_repository
 from src.conversations.routes import router as conversations_router
 from src.ingestion_graph import graph as ingestion_graph_module
 from src.retrieval_graph import graph as retrieval_graph_module
@@ -262,6 +263,17 @@ async def ingest_documents(
         is_shared_value = config_dict.get("configurable", {}).get("is_shared", False)
         is_shared = is_shared_value is True  # Strict boolean check
 
+        # Fetch conversation title for metadata labeling (if not shared)
+        conversation_title = None
+        if not is_shared:
+            try:
+                repo = get_repository()
+                conversation = await repo.get_conversation(thread_id)
+                if conversation:
+                    conversation_title = conversation.get("title")
+            except Exception as e:
+                logger.warning(f"Could not fetch conversation title: {e}")
+
         # Add UUID and thread_id to each document's metadata
         for doc in documents:
             if doc.metadata is None:
@@ -271,8 +283,12 @@ async def ingest_documents(
             # Set thread_id based on shared flag - "__SHARED__" for shared docs
             if is_shared:
                 doc.metadata["thread_id"] = "__SHARED__"
+                doc.metadata["visibility"] = "shared"
+                doc.metadata["conversation_title"] = None
             else:
                 doc.metadata["thread_id"] = thread_id
+                doc.metadata["visibility"] = "private"
+                doc.metadata["conversation_title"] = conversation_title
 
         # Build RunnableConfig with thread_id
         runnable_config = RunnableConfig(

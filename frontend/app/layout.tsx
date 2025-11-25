@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import { Toaster } from "@/components/ui/toaster"
 import { ThemeProvider } from "next-themes"
+import { ConversationProvider } from "@/contexts/conversation-context"
+import { SidebarProvider } from "@/components/ui/sidebar"
 
 import "./globals.css"
 
@@ -22,7 +24,11 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          {children}
+          <ConversationProvider>
+            <SidebarProvider>
+              {children}
+            </SidebarProvider>
+          </ConversationProvider>
           <Toaster />
         </ThemeProvider>
       </body>

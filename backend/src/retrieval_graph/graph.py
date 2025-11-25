@@ -263,6 +263,9 @@ async def compile_with_checkpointer():
     This function should be called during FastAPI startup to initialize
     the checkpointer and recompile the graph with persistence enabled.
 
+    IMPORTANT: This updates the module-level `graph` variable so that
+    other modules importing it will get the checkpointer-enabled version.
+
     Returns:
         The compiled graph with checkpointer.
 
@@ -270,10 +273,11 @@ async def compile_with_checkpointer():
         >>> # In FastAPI startup event
         >>> @app.on_event("startup")
         >>> async def startup():
-        >>>     global graph
-        >>>     graph = await compile_with_checkpointer()
+        >>>     await compile_with_checkpointer()
     """
+    global graph
     from src.shared.checkpointer import get_checkpointer
 
     checkpointer = await get_checkpointer()
-    return builder.compile(checkpointer=checkpointer)
+    graph = builder.compile(checkpointer=checkpointer)
+    return graph

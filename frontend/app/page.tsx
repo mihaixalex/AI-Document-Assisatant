@@ -6,6 +6,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Paperclip, ArrowUp, Loader2 } from 'lucide-react';
 import { ExamplePrompts } from '@/components/example-prompts';
 import { ChatMessage } from '@/components/chat-message';
@@ -18,11 +20,36 @@ import {
 import Particles from '@/components/particles';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useTheme } from 'next-themes';
+import { useConversation } from '@/contexts/conversation-context';
+import { ConversationSidebar } from '@/components/conversation-sidebar';
+import { ConversationHeader } from '@/components/conversation-header';
+import { SidebarInset } from '@/components/ui/sidebar';
+
+// Type definitions for backend messages
+interface BackendMessage {
+  type: 'human' | 'ai';
+  content: string;
+  sources?: PDFDocument[];
+}
+
+interface SSEEvent {
+  event: string;
+  data: unknown;
+}
+
+interface NodeUpdate {
+  [key: string]: {
+    messages?: BackendMessage[];
+    documents?: PDFDocument[];
+  };
+}
 
 export default function Home() {
   const { resolvedTheme } = useTheme();
   const isDarkMode = resolvedTheme === 'dark';
-  const { toast } = useToast(); // Add this hook
+  const { toast } = useToast();
+  const { currentThreadId } = useConversation();
+
   const [messages, setMessages] = useState<
     Array<{
       role: 'user' | 'assistant';
@@ -34,19 +61,45 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
+  const [uploadToShared, setUploadToShared] = useState(false); // Shared knowledge base toggle
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null); // Track the AbortController
-  const messagesEndRef = useRef<HTMLDivElement>(null); // Add this ref
-  const lastRetrievedDocsRef = useRef<PDFDocument[]>([]); // useRef to store the last retrieved documents
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastRetrievedDocsRef = useRef<PDFDocument[]>([]);
 
+  // Load conversation history when currentThreadId changes
   useEffect(() => {
-    // Generate thread ID locally - no server call needed
-    if (!threadId) {
-      const uuid = crypto.randomUUID();
-      setThreadId(uuid);
-    }
-  }, [threadId]);
+    if (!currentThreadId) return;
+
+    const loadHistory = async () => {
+      try {
+        const response = await fetch(`/api/conversations/${currentThreadId}/history`);
+        if (!response.ok) {
+          throw new Error('Failed to load conversation history');
+        }
+        const data = await response.json();
+
+        // Transform backend messages to frontend format
+        if (data.messages && Array.isArray(data.messages)) {
+          const formattedMessages = data.messages.map((msg: BackendMessage) => ({
+            role: msg.type === 'human' ? ('user' as const) : ('assistant' as const),
+            content: msg.content,
+            sources: msg.sources || undefined,
+          }));
+          setMessages(formattedMessages);
+        } else {
+          // No history, start fresh
+          setMessages([]);
+        }
+      } catch (error) {
+        console.error('Error loading conversation history:', error);
+        // Start with empty messages on error
+        setMessages([]);
+      }
+    };
+
+    loadHistory();
+  }, [currentThreadId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,7 +107,7 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !threadId || isLoading) return;
+    if (!input.trim() || !currentThreadId || isLoading) return;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -82,7 +135,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           message: userMessage,
-          threadId,
+          threadId: currentThreadId,
         }),
         signal: abortController.signal,
       });
@@ -107,9 +160,9 @@ export default function Home() {
           if (!line.startsWith('data: ')) continue;
 
           const sseString = line.slice('data: '.length);
-          let sseEvent: any;
+          let sseEvent: SSEEvent;
           try {
-            sseEvent = JSON.parse(sseString);
+            sseEvent = JSON.parse(sseString) as SSEEvent;
           } catch (err) {
             console.error('Error parsing SSE line:', err, line);
             continue;
@@ -119,7 +172,7 @@ export default function Home() {
 
           if (event === 'messages/partial') {
             if (Array.isArray(data)) {
-              const lastObj = data[data.length - 1];
+              const lastObj = data[data.length - 1] as BackendMessage | undefined;
               if (lastObj?.type === 'ai') {
                 const partialContent = lastObj.content ?? '';
 
@@ -146,7 +199,8 @@ export default function Home() {
             }
           } else if (event === 'updates' && data) {
             // Extract the updates object (backend sends data.updates.nodeName)
-            const updates = data?.updates || data;
+            const dataObj = data as { updates?: NodeUpdate } | NodeUpdate;
+            const updates = ('updates' in dataObj ? dataObj.updates : dataObj) as NodeUpdate;
 
             // Handle document retrieval updates
             if (
@@ -164,7 +218,7 @@ export default function Home() {
               Array.isArray(updates.directAnswer.messages)
             ) {
               const messages = updates.directAnswer.messages;
-              const aiMessage = messages.find((msg: any) => msg.type === 'ai');
+              const aiMessage = messages.find((msg: BackendMessage) => msg.type === 'ai');
 
               if (aiMessage && typeof aiMessage.content === 'string') {
                 setMessages((prev) => {
@@ -188,7 +242,7 @@ export default function Home() {
               Array.isArray(updates.generateResponse.messages)
             ) {
               const messages = updates.generateResponse.messages;
-              const aiMessage = messages.find((msg: any) => msg.type === 'ai');
+              const aiMessage = messages.find((msg: BackendMessage) => msg.type === 'ai');
 
               if (aiMessage && typeof aiMessage.content === 'string') {
                 setMessages((prev) => {
@@ -235,6 +289,15 @@ export default function Home() {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length === 0) return;
 
+    if (!currentThreadId) {
+      toast({
+        title: 'Error',
+        description: 'No active conversation. Please create a conversation first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const nonPdfFiles = selectedFiles.filter(
       (file) => file.type !== 'application/pdf',
     );
@@ -253,6 +316,8 @@ export default function Home() {
       selectedFiles.forEach((file) => {
         formData.append('files', file);
       });
+      formData.append('threadId', currentThreadId);
+      formData.append('isShared', uploadToShared.toString()); // Pass shared KB flag
 
       const response = await fetch('/api/ingest', {
         method: 'POST',
@@ -298,47 +363,52 @@ export default function Home() {
 
   return (
     <>
-      {/* Particles background - only visible in dark mode */}
-      {isDarkMode && (
-        <div className="fixed inset-0 pointer-events-none z-0">
-          <Particles
-            particleCount={150}
-            particleSpread={15}
-            speed={0.05}
-            particleColors={['#ffffff', '#ffffff', '#ffffff']}
-            alphaParticles={true}
-            particleBaseSize={200}
-            sizeRandomness={2}
-          />
-        </div>
-      )}
-
-      {/* Theme toggle button */}
-      <ThemeToggle />
-
-      <main className="flex min-h-screen flex-col items-center p-4 md:p-24 max-w-5xl mx-auto w-full relative z-10">
-        {messages.length === 0 ? (
-        <>
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <p className="font-medium text-muted-foreground max-w-md mx-auto text-2xl">
-                Coffee and Jarvis time? ☕
-              </p>
-            </div>
+      <ConversationSidebar />
+      <SidebarInset>
+        {/* Particles background - only visible in dark mode */}
+        {isDarkMode && (
+          <div className="fixed inset-0 pointer-events-none z-0">
+            <Particles
+              particleCount={150}
+              particleSpread={15}
+              speed={0.05}
+              particleColors={['#ffffff', '#ffffff', '#ffffff']}
+              alphaParticles={true}
+              particleBaseSize={200}
+              sizeRandomness={2}
+            />
           </div>
-          <ExamplePrompts onPromptSelect={setInput} />
-        </>
-      ) : (
-        <div className="w-full space-y-4 mb-20">
-          {messages.map((message, i) => (
-            <ChatMessage key={i} message={message} />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-      )}
+        )}
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background">
-        <div className="max-w-5xl mx-auto space-y-4">
+        {/* Theme toggle button */}
+        <ThemeToggle />
+
+        {/* Header with conversation title and mobile menu */}
+        <ConversationHeader />
+
+        <main className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center p-4 md:p-24 max-w-5xl mx-auto w-full relative z-10">
+          {messages.length === 0 ? (
+          <>
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <p className="font-medium text-muted-foreground max-w-md mx-auto text-2xl">
+                  Coffee and Jarvis time? ☕
+                </p>
+              </div>
+            </div>
+            <ExamplePrompts onPromptSelect={setInput} />
+          </>
+        ) : (
+          <div className="w-full space-y-4 mb-20">
+            {messages.map((message, i) => (
+              <ChatMessage key={i} message={message} />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-background md:left-[var(--sidebar-width)]">
+          <div className="max-w-5xl mx-auto space-y-4">
           {files.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
               {files.map((file, index) => (
@@ -350,6 +420,18 @@ export default function Home() {
               ))}
             </div>
           )}
+
+          {/* Shared knowledge base toggle */}
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="shared-kb"
+              checked={uploadToShared}
+              onCheckedChange={(checked) => setUploadToShared(checked === true)}
+            />
+            <Label htmlFor="shared-kb" className="text-sm text-muted-foreground cursor-pointer">
+              Add to shared knowledge base (accessible in all conversations)
+            </Label>
+          </div>
 
           <form onSubmit={handleSubmit} className="relative">
             <div
@@ -394,7 +476,7 @@ export default function Home() {
                   isUploading ? 'Uploading PDF...' : 'Send a message...'
                 }
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-12 bg-transparent"
-                disabled={isUploading || isLoading || !threadId}
+                disabled={isUploading || isLoading || !currentThreadId}
                 style={{
                   backgroundColor: 'transparent',
                   color: isDarkMode ? '#f9fafb' : '#111827',
@@ -406,7 +488,7 @@ export default function Home() {
                 size="icon"
                 className="rounded-none h-12"
                 disabled={
-                  !input.trim() || isUploading || isLoading || !threadId
+                  !input.trim() || isUploading || isLoading || !currentThreadId
                 }
                 style={{
                   backgroundColor: 'transparent',
@@ -421,9 +503,10 @@ export default function Home() {
               </Button>
             </div>
           </form>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+      </SidebarInset>
     </>
   );
 }

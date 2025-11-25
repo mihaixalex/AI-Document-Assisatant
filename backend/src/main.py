@@ -258,13 +258,21 @@ async def ingest_documents(
         loader = PyPDFLoader(temp_file_path)
         documents = loader.load()
 
+        # Extract is_shared flag from config (defaults to False) - strict boolean validation
+        is_shared_value = config_dict.get("configurable", {}).get("is_shared", False)
+        is_shared = is_shared_value is True  # Strict boolean check
+
         # Add UUID and thread_id to each document's metadata
         for doc in documents:
             if doc.metadata is None:
                 doc.metadata = {}
             doc.metadata["uuid"] = str(uuid.uuid4())
             doc.metadata["source"] = file.filename
-            doc.metadata["thread_id"] = thread_id
+            # Set thread_id based on shared flag - "__SHARED__" for shared docs
+            if is_shared:
+                doc.metadata["thread_id"] = "__SHARED__"
+            else:
+                doc.metadata["thread_id"] = thread_id
 
         # Build RunnableConfig with thread_id
         runnable_config = RunnableConfig(

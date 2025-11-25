@@ -43,8 +43,13 @@ class ConversationRepository:
         """
         if self._pool is None:
             self._pool = AsyncConnectionPool(
-                self.database_url, min_size=2, max_size=10, kwargs={"row_factory": dict_row}
+                self.database_url,
+                min_size=2,
+                max_size=10,
+                kwargs={"row_factory": dict_row},
+                open=False,  # Explicit: pool must be opened before use
             )
+            await self._pool.open()  # Open the pool
         return self._pool
 
     async def list_conversations(

@@ -10,7 +10,6 @@ import os
 import uuid
 from typing import Any
 
-import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -186,7 +185,9 @@ class ConversationRepository:
                     raise
 
     async def soft_delete_conversation(self, thread_id: str) -> bool:
-        """Soft delete a conversation by setting is_deleted flag.
+        """Soft delete a conversation with 30-day retention.
+
+        Sets is_deleted=true, deleted_at=NOW(), and expires_at=NOW()+30 days.
 
         Args:
             thread_id: LangGraph thread identifier
@@ -200,7 +201,10 @@ class ConversationRepository:
                 try:
                     query = """
                         UPDATE conversations
-                        SET is_deleted = true, updated_at = NOW()
+                        SET is_deleted = true,
+                            deleted_at = NOW(),
+                            expires_at = NOW() + interval '30 days',
+                            updated_at = NOW()
                         WHERE thread_id = %s AND is_deleted = false
                         RETURNING id
                     """
@@ -212,6 +216,78 @@ class ConversationRepository:
                 except Exception as e:
                     await conn.rollback()
                     logger.error("Failed to delete conversation: %s", e)
+                    raise
+
+    async def list_deleted_conversations(
+        self, limit: int = 50, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List soft-deleted conversations with pagination.
+
+        Args:
+            limit: Maximum number of conversations to return (default 50)
+            offset: Number of conversations to skip (default 0)
+
+        Returns:
+            Tuple of (deleted conversations list, total count)
+        """
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # Count total deleted conversations
+                count_query = """
+                    SELECT COUNT(*) as count FROM conversations
+                    WHERE is_deleted = true AND expires_at > NOW()
+                """
+                await cur.execute(count_query)
+                count_result = await cur.fetchone()
+                total = count_result["count"] if count_result else 0
+
+                # Get paginated deleted conversations
+                list_query = """
+                    SELECT id, thread_id, title, created_at, updated_at, user_id,
+                           is_deleted, deleted_at, expires_at
+                    FROM conversations
+                    WHERE is_deleted = true AND expires_at > NOW()
+                    ORDER BY deleted_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                await cur.execute(list_query, (limit, offset))
+                conversations = await cur.fetchall()
+
+                return (list(conversations), total)
+
+    async def restore_conversation(self, thread_id: str) -> dict[str, Any] | None:
+        """Restore a soft-deleted conversation.
+
+        Clears is_deleted, deleted_at, and expires_at fields.
+
+        Args:
+            thread_id: LangGraph thread identifier
+
+        Returns:
+            Restored conversation record as dict or None if not found
+        """
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                try:
+                    query = """
+                        UPDATE conversations
+                        SET is_deleted = false,
+                            deleted_at = NULL,
+                            expires_at = NULL,
+                            updated_at = NOW()
+                        WHERE thread_id = %s AND is_deleted = true
+                        RETURNING id, thread_id, title, created_at, updated_at, user_id, is_deleted
+                    """
+                    await cur.execute(query, (thread_id,))
+                    result = await cur.fetchone()
+
+                    await conn.commit()
+                    return dict(result) if result else None
+                except Exception as e:
+                    await conn.rollback()
+                    logger.error("Failed to restore conversation: %s", e)
                     raise
 
     async def close(self) -> None:

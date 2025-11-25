@@ -7,6 +7,8 @@ import { useRef, useState, useEffect } from 'react';
 import { Paperclip, ArrowUp, Loader2 } from 'lucide-react';
 import { ChatMessage } from '@/components/chat-message';
 import { FilePreview } from '@/components/file-preview';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import {
   PDFDocument,
 } from '@/types/graphTypes';
@@ -426,17 +428,19 @@ export default function Home() {
             )}
 
             {/* Shared KB Toggle */}
-            <div className="flex items-center gap-2 mb-3">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-3 mb-3">
+              <Switch
                 id="shared-kb"
                 checked={uploadToShared}
-                onChange={(e) => setUploadToShared(e.target.checked)}
-                className="w-4 h-4 rounded bg-[#1F1F1F] border-[#333333] text-[#00FF9D] focus:ring-[#00FF9D] focus:ring-offset-0 cursor-pointer"
+                onCheckedChange={setUploadToShared}
+                className="data-[state=checked]:bg-[#00FF9D] data-[state=unchecked]:bg-[#333333]"
               />
-              <label htmlFor="shared-kb" className="text-sm text-[#AAAAAA] cursor-pointer">
+              <Label
+                htmlFor="shared-kb"
+                className="text-sm text-[#AAAAAA] cursor-pointer hover:text-white transition-colors"
+              >
                 Add to shared knowledge base
-              </label>
+              </Label>
             </div>
 
             {/* Input Form */}

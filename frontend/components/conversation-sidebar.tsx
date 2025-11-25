@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { Plus, MessageSquare, Loader2, Menu } from 'lucide-react';
+import { Plus, MessageSquare, Loader2, Menu, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useConversation } from '@/contexts/conversation-context';
 import { ConversationItem } from '@/components/conversation-item';
+import { DeletedConversationItem } from '@/components/deleted-conversation-item';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -11,6 +12,11 @@ import {
   DrawerContent,
   DrawerTrigger,
 } from '@/components/ui/drawer';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 
 interface SidebarContentProps {
   onNewChat: () => void;
@@ -18,12 +24,14 @@ interface SidebarContentProps {
 }
 
 function SidebarContentInner({ onNewChat, isCreating }: SidebarContentProps) {
-  const { conversations, isLoading, error, refreshConversations } = useConversation();
+  const { conversations, deletedConversations, isLoading, error, refreshConversations } = useConversation();
+  const [isDeletedOpen, setIsDeletedOpen] = useState(false);
 
   const showLoading = isLoading && conversations.length === 0;
   const showError = error && !isLoading;
   const showEmpty = !isLoading && !error && conversations.length === 0;
   const showList = !isLoading && !error && conversations.length > 0;
+  const hasDeletedConversations = deletedConversations.length > 0;
 
   return (
     <>
@@ -94,6 +102,31 @@ function SidebarContentInner({ onNewChat, isCreating }: SidebarContentProps) {
                 conversation={conversation}
               />
             ))}
+          </div>
+        )}
+
+        {/* Deleted Conversations Section */}
+        {hasDeletedConversations && (
+          <div className="mt-4 pt-4 border-t border-[#1F1F1F]">
+            <Collapsible open={isDeletedOpen} onOpenChange={setIsDeletedOpen}>
+              <CollapsibleTrigger className="flex items-center gap-2 w-full px-2 py-2 text-sm text-[#AAAAAA] hover:text-white hover:bg-[#1A1A1A] rounded-md transition-colors">
+                {isDeletedOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                <Trash2 className="h-4 w-4" />
+                <span>Deleted ({deletedConversations.length})</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-1 space-y-1">
+                {deletedConversations.map((conversation) => (
+                  <DeletedConversationItem
+                    key={conversation.threadId}
+                    conversation={conversation}
+                  />
+                ))}
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         )}
       </div>

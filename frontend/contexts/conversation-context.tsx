@@ -11,8 +11,15 @@ export interface Conversation {
   updatedAt: string;
 }
 
+export interface DeletedConversation extends Conversation {
+  isDeleted: boolean;
+  deletedAt: string | null;
+  expiresAt: string | null;
+}
+
 interface ConversationContextType {
   conversations: Conversation[];
+  deletedConversations: DeletedConversation[];
   currentThreadId: string | null;
   isLoading: boolean;
   isHydrated: boolean;
@@ -20,8 +27,10 @@ interface ConversationContextType {
   createConversation: (title?: string) => Promise<Conversation>;
   loadConversation: (threadId: string) => Promise<void>;
   deleteConversation: (threadId: string) => Promise<void>;
+  restoreConversation: (threadId: string) => Promise<void>;
   updateConversation: (threadId: string, title: string) => Promise<Conversation>;
   refreshConversations: () => Promise<void>;
+  refreshDeletedConversations: () => Promise<void>;
   setCurrentThreadId: (threadId: string | null) => void;
 }
 
@@ -43,6 +52,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [deletedConversations, setDeletedConversations] = useState<DeletedConversation[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,6 +107,21 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }, [toast]);
+
+  // Fetch deleted conversations
+  const refreshDeletedConversations = useCallback(async () => {
+    try {
+      const response = await fetch('/api/conversations/deleted');
+      if (!response.ok) {
+        throw new Error('Failed to fetch deleted conversations');
+      }
+      const data = await response.json();
+      setDeletedConversations(data.conversations || []);
+    } catch (err) {
+      console.error('Error fetching deleted conversations:', err);
+      // Don't show toast for deleted conversations - it's not critical
+    }
+  }, []);
 
   // Create a new conversation
   const createConversation = useCallback(async (title?: string): Promise<Conversation> => {
@@ -185,9 +210,12 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         });
       }
 
+      // Refresh deleted conversations to show in "Deleted" section
+      await refreshDeletedConversations();
+
       toast({
         title: 'Conversation deleted',
-        description: 'The conversation has been removed.',
+        description: 'Moved to Deleted section. Can be restored within 30 days.',
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -198,7 +226,44 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       });
       throw err;
     }
-  }, [toast, createConversation]);
+  }, [toast, createConversation, refreshDeletedConversations]);
+
+  // Restore a deleted conversation
+  const restoreConversation = useCallback(async (threadId: string) => {
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}/restore`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to restore conversation');
+      }
+
+      const restoredConversation = await response.json();
+
+      // Add to active conversations list
+      setConversations((prev) => [restoredConversation, ...prev]);
+
+      // Remove from deleted conversations
+      setDeletedConversations((prev) => prev.filter((c) => c.threadId !== threadId));
+
+      // Set as current conversation
+      setCurrentThreadId(restoredConversation.threadId);
+
+      toast({
+        title: 'Conversation restored',
+        description: 'The conversation has been restored successfully.',
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      throw err;
+    }
+  }, [toast, setCurrentThreadId]);
 
   // Update a conversation's title
   const updateConversation = useCallback(async (threadId: string, title: string): Promise<Conversation> => {
@@ -304,6 +369,19 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
             setCurrentThreadIdState(fetchedConversations[0].threadId);
           }
         }
+
+        // Also fetch deleted conversations
+        if (mounted) {
+          try {
+            const deletedResponse = await fetch('/api/conversations/deleted');
+            if (deletedResponse.ok) {
+              const deletedData = await deletedResponse.json();
+              setDeletedConversations(deletedData.conversations || []);
+            }
+          } catch {
+            // Silently fail - deleted conversations are not critical
+          }
+        }
       } catch (error) {
         if (mounted) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -330,6 +408,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
 
   const value: ConversationContextType = {
     conversations,
+    deletedConversations,
     currentThreadId,
     isLoading,
     isHydrated,
@@ -337,8 +416,10 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     createConversation,
     loadConversation,
     deleteConversation,
+    restoreConversation,
     updateConversation,
     refreshConversations,
+    refreshDeletedConversations,
     setCurrentThreadId,
   };
 

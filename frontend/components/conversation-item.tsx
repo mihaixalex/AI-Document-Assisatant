@@ -193,7 +193,7 @@ export function ConversationItem({ conversation }: ConversationItemProps) {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-white">Delete Conversation</AlertDialogTitle>
             <AlertDialogDescription className="text-[#AAAAAA]">
-              Delete &quot;{title}&quot;? This cannot be undone.
+              Delete &quot;{title}&quot;? You can restore it from the Deleted section within 30 days.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
